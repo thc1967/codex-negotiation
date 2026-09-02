@@ -111,6 +111,17 @@ NEGConstants.iconRoll = "ui-icons/dsdice/djordice-d10.png"
 --- thing left to do with that track is clear it for the next one.
 NEGConstants.iconReset = "phosphor/arrows-counter-clockwise-fill.png"
 
+--- The gavel on a pitfall row. An argument that walks into a pitfall is never
+--- rolled for; pressing this is the whole resolution.
+NEGConstants.iconPitfall = "phosphor/gavel.png"
+
+--- Whether the lead's argument appeals to a motivation. Dim for not, lit for
+--- yes, the same two states the eyes wear.
+NEGConstants.iconMotivation = "phosphor/hand-heart-light.png"
+
+--- Whether the lead is leaning on their Renown, which buys them an edge.
+NEGConstants.iconRenown = "phosphor/crown-cross-light.png"
+
 --- What a scale wears when the Director has not opened it. The bubbles stay,
 --- so the table can see there IS a scale and how long it is - they just do not
 --- get to read it.

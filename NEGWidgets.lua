@@ -366,7 +366,7 @@ function NEGWidgets.Tray(entries, onReturn)
 end
 
 --- A place to stand one hero: click for a menu, or drag one in.
---- @param args {label: string, charid: nil|string, name: nil|string, inert: boolean, options: {charid: string, name: string}[], place: fun(charid: string), clear: fun()}
+--- @param args {label: string, charid: nil|string, name: nil|string, renown: nil|number, inert: boolean, options: {charid: string, name: string}[], place: fun(charid: string), clear: fun()}
 --- @return Panel
 function NEGWidgets.Slot(args)
     local charid = args.charid
@@ -467,6 +467,14 @@ function NEGWidgets.Slot(args)
         children = children,
     }
 
+    --Their Renown, which is what the NPC's Impression is read against. Dressed
+    --as the slot's own label so the two read as one caption, and gone entirely
+    --while the slot is empty.
+    local renownText = ""
+    if charid ~= nil and args.renown ~= nil then
+        renownText = string.format("R: %d", args.renown)
+    end
+
     return gui.Panel{
         width = NEGConstants.slotSize,
         height = "auto",
@@ -485,6 +493,17 @@ function NEGWidgets.Slot(args)
             valign = "top",
             textAlignment = "center",
             text = args.label or "",
+        },
+
+        gui.Label{
+            classes = { "sizeXs", "noBold", "fgMuted",
+                cond(renownText ~= "", nil, "collapsed") },
+            width = "100%",
+            height = "auto",
+            halign = "center",
+            valign = "top",
+            textAlignment = "center",
+            text = renownText,
         },
     }
 end

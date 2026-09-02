@@ -53,11 +53,13 @@ local function FieldValue(args)
     return gui.Label(panelArgs)
 end
 
---- One motivation or pitfall: the Director's eye, the trait, and its note.
+--- One motivation or pitfall: the Director's eye, the pitfall gavel, the trait,
+--- and its note.
 --- @param entry table a NEGRun.Traits row
+--- @param kind string "motivations" or "pitfalls"
 --- @param director boolean
 --- @return Panel
-local function TraitRow(entry, director)
+local function TraitRow(entry, kind, director)
     --The table gets one line of prose, not a row of controls.
     if not director then
         return gui.Label{
@@ -81,6 +83,25 @@ local function TraitRow(entry, director)
             end,
         },
     }
+
+    --The rules settle a pitfall without a roll, so this button is the whole
+    --resolution: both scales pay, and the argument comes off the floor.
+    if kind == "pitfalls" then
+        children[#children + 1] = gui.Button{
+            classes = { "sizeS", "withDanger" },
+            icon = NEGConstants.iconPitfall,
+            halign = "left",
+            valign = "center",
+            lmargin = 6,
+            hover = gui.Tooltip(
+                "They argued into this pitfall. No roll: interest -1, patience -1, "
+                .. "the pitfall is shown to the table, and the argument's heroes go "
+                .. "back to the tray spent."),
+            click = function()
+                NEGRun.HitPitfall(entry.id)
+            end,
+        }
+    end
 
     children[#children + 1] = gui.Label{
         classes = { "sizeS" },
@@ -152,7 +173,7 @@ local function TraitColumn(live, kind, title, director)
     for _, entry in ipairs(entries) do
         if director or entry.revealed then
             shown = shown + 1
-            children[#children + 1] = TraitRow(entry, director)
+            children[#children + 1] = TraitRow(entry, kind, director)
         end
     end
 
@@ -390,11 +411,32 @@ local function TrackPanel(live, args)
 
     --The curtain only stops clicks; a drop target is a separate mechanism, so
     --the lockout has to make the slots inert as well.
-    local locked = not args.director
-        and args.track == NEGConstants.trackLearn
+    local locked = args.track == NEGConstants.trackLearn
         and live:try_get("learnLocked", false)
 
-    local sealed = rolling or locked
+    --Read before the lockouts, because they read these. Staffed means a hero is
+    --standing in the track; settled means one of its slots holds a finished
+    --roll. Asking for a roll is the Director's call, so the table gets no die,
+    --and a track whose roll is in swaps its die for a reset.
+    local staffed = false
+    local settled = false
+    for _, slot in ipairs(args.slots) do
+        if NEGRun.Slot(live, slot.key) ~= nil then
+            staffed = true
+        end
+        if NEGRun.RollFor(live, slot.key) ~= nil then
+            settled = true
+        end
+    end
+
+    --Patience is spent, so nothing here can roll again. The table is told at
+    --once. The Director keeps the track until they have cleared out whoever was
+    --standing in it, so the roll that ended the negotiation can still be read
+    --and reset rather than being curtained off mid-resolution.
+    local expired = live.patience <= NEGConstants.scaleMin
+        and (not args.director or not (staffed or settled))
+
+    local sealed = rolling or locked or expired
     local free = NEGRun.FreeHeroes(live)
 
     --Ready means a hero is standing there, nothing more. Whether a roll is
@@ -402,15 +444,6 @@ local function TrackPanel(live, args)
     --dead one, and clear the dead one rather than stay disabled forever.
     local primary = args.slots[1].key
     local ready = NEGRun.Slot(live, primary) ~= nil
-
-    --Asking for a roll is the Director's call, so the table gets no die. A
-    --track whose roll is in swaps its die for a reset.
-    local settled = false
-    for _, slot in ipairs(args.slots) do
-        if NEGRun.RollFor(live, slot.key) ~= nil then
-            settled = true
-        end
-    end
 
     local slotKeys = {}
     for _, slot in ipairs(args.slots) do
@@ -509,6 +542,13 @@ local function TrackPanel(live, args)
 
         local pickers = {}
         local roll = NEGRun.RollFor(live, slotKey)
+
+        --Renown rides with the argument's two seats, which is where it is
+        --weighed against the NPC's Impression.
+        local renown = nil
+        if entry ~= nil and args.track == NEGConstants.trackArgument then
+            renown = NEGRules.Renown(entry.charid)
+        end
 
         if roll ~= nil then
             --The choices are spent, so what they produced replaces them. Both
@@ -617,19 +657,61 @@ local function TrackPanel(live, args)
 
             --Only the lead argues. Set before the die goes out: it decides
             --which ladder the returned tier is read against.
-            if slotKey == NEGConstants.slotLead and args.director then
-                pickers[#pickers + 1] = gui.Check{
-                    classes = { "sizeXs" },
-                    text = "Motivation",
+            if args.director
+                and (slotKey == NEGConstants.slotLead
+                    or slotKey == NEGConstants.slotAssist) then
+                local toggles = {}
+
+                --The heart picks the ladder the argument's own tier is read
+                --against, which is the lead's business. An assist's tier never
+                --meets that ladder - it becomes the grant it hands the lead.
+                if slotKey == NEGConstants.slotLead then
+                    local appealing = live:try_get("appealMotivation", false)
+
+                    toggles[#toggles + 1] = gui.Panel{
+                        classes = { cond(appealing, "bgSuccess", "bgFgMuted") },
+                        width = 20,
+                        height = 20,
+                        halign = "left",
+                        valign = "center",
+                        bgimage = NEGConstants.iconMotivation,
+                        hover = gui.Tooltip(cond(appealing,
+                            "Appealing to motivation",
+                            "Not appealing to motivation")),
+                        press = function()
+                            NEGRun.SetAppealMotivation(not appealing)
+                        end,
+                    }
+                end
+
+                --Either seat can lean on its own hero's Renown, and it edges
+                --that seat's own roll.
+                local edging = entry.renownEdge == true
+
+                toggles[#toggles + 1] = gui.Panel{
+                    classes = { cond(edging, "bgSuccess", "bgFgMuted") },
+                    width = 20,
+                    height = 20,
+                    halign = "left",
+                    valign = "center",
+                    lmargin = cond(#toggles > 0, 6, 0),
+                    bgimage = NEGConstants.iconRenown,
+                    hover = gui.Tooltip(cond(edging,
+                        "Influencing with Renown",
+                        "Not influencing with Renown")),
+                    press = function()
+                        NEGRun.SetSlotField(slotKey, "renownEdge", not edging)
+                    end,
+                }
+
+                pickers[#pickers + 1] = gui.Panel{
                     width = "98%",
                     height = 24,
+                    flow = "horizontal",
                     halign = "left",
                     valign = "center",
                     vmargin = 1,
-                    value = live:try_get("appealMotivation", false),
-                    change = function(element)
-                        NEGRun.SetAppealMotivation(element.value)
-                    end,
+                    children = toggles,
                 }
             end
         end
@@ -645,6 +727,7 @@ local function TrackPanel(live, args)
                 label = slot.label,
                 charid = entry ~= nil and entry.charid or nil,
                 name = entry ~= nil and NEGRun.ParticipantName(live, entry.charid) or "",
+                renown = renown,
                 inert = sealed,
                 options = free,
                 place = function(charid)
@@ -675,23 +758,24 @@ local function TrackPanel(live, args)
         children = units,
     }
 
-    --Appended last, which is what puts it on top. The Director's side stays
-    --live: covering it would trap them behind their own request.
-    if not args.director then
-        local curtainText = nil
+    --Appended last, which is what puts it on top. A spent read is barred on
+    --both sides, so both get that curtain. A roll still out curtains only the
+    --table: covering the Director's would take away the die that recalls it.
+    --Expiry outranks the rest - it is the end of the negotiation, not a wait.
+    local curtainText = nil
 
-        if rolling then
-            curtainText = "Rolling..."
-        elseif args.track == NEGConstants.trackLearn
-            and live:try_get("learnLocked", false) then
-            curtainText = "Just Rolled"
-        end
+    if expired then
+        curtainText = "Patience expired"
+    elseif not args.director and rolling then
+        curtainText = "Rolling..."
+    elseif locked then
+        curtainText = "Just Rolled"
+    end
 
-        if curtainText ~= nil then
-            local curtain = NEGWidgets.Overlay(curtainText, "sizeL", 1, 0)
-            curtain:SetClass("collapsed", false)
-            children[#children + 1] = curtain
-        end
+    if curtainText ~= nil then
+        local curtain = NEGWidgets.Overlay(curtainText, "sizeL", 1, 0)
+        curtain:SetClass("collapsed", false)
+        children[#children + 1] = curtain
     end
 
     return gui.Panel{
@@ -1009,6 +1093,7 @@ function NEGRunPanel.Create(args)
                 height = "auto",
                 halign = "left",
                 valign = "top",
+                tmargin = 16,
                 text = "Their Final Offer",
             },
 
@@ -1168,21 +1253,39 @@ function NEGRunPanel.Create(args)
                 workingColumn:SetClass("collapsed", finished)
             end
 
+            local def = live:Definition()
+
+            --The NPC stays beside the board for the whole negotiation, the
+            --ending included: the table is looking at a person, not a form.
+            --Set BEFORE the ending's early return, which otherwise leaves a
+            --freshly built window - a reload, or a re-present after the
+            --negotiation closed - with the portrait still collapsed.
+            if not director then
+                portraitColumn:SetClass("collapsed", false)
+
+                local portraitid = def ~= nil and def:try_get("portraitid", "") or ""
+                portrait:SetClass("collapsed", portraitid == "")
+                if portraitid ~= "" then
+                    portrait.bgimage = portraitid
+                end
+            end
+
             if finished then
                 local value = NEGConstants.Clamp(live.interest,
                     NEGConstants.scaleMin, NEGConstants.scaleMax)
-                local caption, captionClass = NEGWidgets.InterestCaption(value)
+                --Only the tone is wanted here. InterestCaption's text is
+                --"N  <offer name>", so its remainder past the number IS the
+                --offer name, and pairing the two said it twice.
+                local _, captionClass = NEGWidgets.InterestCaption(value)
 
                 endingVerdict:SetClass("danger", captionClass == "danger")
                 endingVerdict:SetClass("warning", captionClass == "warning")
                 endingVerdict:SetClass("success", captionClass == "success")
-                endingVerdict.text = string.format("%s  %s",
-                    NEGRules.OfferName(value), caption:gsub("^%d+%s+", ""))
+                endingVerdict.text = NEGRules.OfferName(value)
                 endingOffer.text = live:OfferText()
                 return
             end
 
-            local def = live:Definition()
             local langid = def ~= nil and def:try_get("languageId", "") or ""
 
             statsRow:SetClass("collapsed", not director)
@@ -1215,14 +1318,6 @@ function NEGRunPanel.Create(args)
 
                 local language = NEGRules.LanguageName(langid)
                 languageLabel.text = cond(language ~= "", language, "None set")
-            else
-                portraitColumn:SetClass("collapsed", false)
-
-                local portraitid = def ~= nil and def:try_get("portraitid", "") or ""
-                portrait:SetClass("collapsed", portraitid == "")
-                if portraitid ~= "" then
-                    portrait.bgimage = portraitid
-                end
             end
 
             local scales = BuildScales(live)

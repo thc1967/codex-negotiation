@@ -270,18 +270,45 @@ function NEGRules.LearnOutcome(tier)
     }
 end
 
+--- The Uncovering Motivations ladder as the rulebook words it, for the roll
+--- dialog's tier table. LearnOutcome carries the same three results in the
+--- Director's shorthand, which is what their board shows once the roll is in.
+--- @return string[]
+function NEGRules.LearnTierText()
+    return {
+        "The hero learns no information regarding the NPC's motivations or "
+            .. "pitfalls, and the NPC realizes the hero is trying to read them "
+            .. "and becomes annoyed. As a consequence, the NPC's patience is "
+            .. "reduced by 1.",
+        "The hero learns no information regarding the NPC's motivations or "
+            .. "pitfalls.",
+        "The hero learns one of the NPC's motivations or pitfalls (their choice).",
+    }
+end
+
+--- What walking into a pitfall costs, per Pitfalls. No test is rolled: the
+--- argument is simply a mistake, and both scales pay for it.
+--- @return {interest: number, patience: number, text: string}
+function NEGRules.PitfallOutcome()
+    return {
+        interest = -1,
+        patience = -1,
+        text = "They walked into a pitfall. Interest -1, patience -1.",
+    }
+end
+
 --- The three tier outcomes a roller can be shown, as real text.
 --- @param track string
 --- @param motivation boolean
 --- @return string[]
 function NEGRules.TierText(track, motivation)
+    if track == NEGConstants.trackLearn then
+        return NEGRules.LearnTierText()
+    end
+
     local tiers = {}
     for tier = 1, 3 do
-        if track == NEGConstants.trackLearn then
-            tiers[tier] = NEGRules.LearnOutcome(tier).text
-        else
-            tiers[tier] = NEGRules.ArgumentOutcome(tier, motivation, 0).text
-        end
+        tiers[tier] = NEGRules.ArgumentOutcome(tier, motivation, 0).text
     end
     return tiers
 end
@@ -392,6 +419,23 @@ function NEGRules.CharacteristicModifier(charid, attrId)
         modifier = token.properties:GetAttribute(attrId):Modifier()
     end)
     return modifier
+end
+
+--- This hero's Renown, the score an NPC's Impression is read against. Nil when
+--- the character cannot be read at all; 0 is a real Renown, since that is where
+--- every hero starts.
+--- @param charid string
+--- @return number|nil
+function NEGRules.Renown(charid)
+    local token = dmhub.GetCharacterById(charid)
+    if token == nil or token.properties == nil then
+        return nil
+    end
+    local renown = nil
+    pcall(function()
+        renown = token.properties:CalculateNamedCustomAttribute("Renown")
+    end)
+    return renown
 end
 
 --- @param modifier number|nil

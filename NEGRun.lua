@@ -460,8 +460,63 @@ function NEGRun.FreeHeroes(live)
     return result
 end
 
---- Clear one track: its heroes go back to the tray marked spent and its roll
---- is forgotten. Once everyone is spent the set clears, turning the round over.
+--- Take one track off the floor: its heroes go back to the tray marked spent
+--- and its roll is forgotten. Once everyone is spent the set clears, turning
+--- the round over. Runs INSIDE a document mutation, on the live it is handed.
+--- @param live NEGLive
+--- @param track string
+--- @param slotKeys string[]
+local function ClearTrack(live, track, slotKeys)
+    local acted = {}
+    for key, value in pairs(live.acted) do
+        acted[key] = value
+    end
+
+    local slots = {}
+    for key, entry in pairs(live.slots) do
+        slots[key] = entry
+    end
+
+    local rolls = {}
+    for key, value in pairs(live.rolls) do
+        rolls[key] = value
+    end
+
+    for _, slotKey in ipairs(slotKeys) do
+        local entry = slots[slotKey]
+        if entry ~= nil and entry.charid ~= nil then
+            acted[entry.charid] = true
+        end
+        slots[slotKey] = nil
+        rolls[slotKey] = nil
+    end
+
+    --Everyone spent means nobody is.
+    local anyFresh = false
+    for _, p in ipairs(live.participants) do
+        if p.included ~= false and acted[p.charid] ~= true then
+            anyFresh = true
+        end
+    end
+    if not anyFresh then
+        acted = {}
+    end
+
+    live.acted = acted
+    live.slots = slots
+    live.rolls = rolls
+
+    --Clearing a read locks it; clearing an argument is what frees it again.
+    if track == NEGConstants.trackArgument then
+        live.assistTier = 0
+        live.appealMotivation = false
+        live.learnLocked = false
+    else
+        live.learnLocked = true
+    end
+end
+
+--- Clear one track for the next argument.
 --- @param track string
 --- @param slotKeys string[]
 function NEGRun.ResetTrack(track, slotKeys)
@@ -470,54 +525,7 @@ function NEGRun.ResetTrack(track, slotKeys)
         if live == nil then
             return
         end
-
-        local acted = {}
-        for key, value in pairs(live.acted) do
-            acted[key] = value
-        end
-
-        local slots = {}
-        for key, entry in pairs(live.slots) do
-            slots[key] = entry
-        end
-
-        local rolls = {}
-        for key, value in pairs(live.rolls) do
-            rolls[key] = value
-        end
-
-        for _, slotKey in ipairs(slotKeys) do
-            local entry = slots[slotKey]
-            if entry ~= nil and entry.charid ~= nil then
-                acted[entry.charid] = true
-            end
-            slots[slotKey] = nil
-            rolls[slotKey] = nil
-        end
-
-        --Everyone spent means nobody is.
-        local anyFresh = false
-        for _, p in ipairs(live.participants) do
-            if p.included ~= false and acted[p.charid] ~= true then
-                anyFresh = true
-            end
-        end
-        if not anyFresh then
-            acted = {}
-        end
-
-        live.acted = acted
-        live.slots = slots
-        live.rolls = rolls
-
-        --Clearing a read locks it; clearing an argument is what frees it again.
-        if track == NEGConstants.trackArgument then
-            live.assistTier = 0
-            live.appealMotivation = false
-            live.learnLocked = false
-        else
-            live.learnLocked = true
-        end
+        ClearTrack(live, track, slotKeys)
     end)
 end
 
@@ -601,6 +609,7 @@ function NEGRun.SetAppealMotivation(value)
     end)
 end
 
+
 --- The roll a slot has already made, or nil.
 --- @param live NEGLive
 --- @param slot string
@@ -627,9 +636,11 @@ function NEGRun.ClearFloor()
     end)
 end
 
+--- Every field is listed rather than copied wholesale, so anything new on a
+--- slot entry has to be named here or the next write drops it.
 --- @param slot string
---- @param key string "attrId" or "skillId"
---- @param value string
+--- @param key string "attrId", "skillId" or "renownEdge"
+--- @param value any
 function NEGRun.SetSlotField(slot, key, value)
     MutateSlot(slot, function(entry)
         if entry == nil then
@@ -639,6 +650,7 @@ function NEGRun.SetSlotField(slot, key, value)
             charid = entry.charid,
             attrId = entry.attrId,
             skillId = entry.skillId,
+            renownEdge = entry.renownEdge,
         }
         updated[key] = value
         return updated
@@ -732,6 +744,63 @@ function NEGRun.SetTraitRevealed(rowId, shown)
     end)
 end
 
+--- The heroes argued straight into one of the NPC's pitfalls. No test is
+--- rolled: interest and patience each drop by 1, the pitfall opens to the table
+--- so they can see what they trod on, and whoever was arguing goes back to the
+--- tray spent.
+--- @param rowId string the pitfall's NEGRun.Traits row id
+function NEGRun.HitPitfall(rowId)
+    local live = NEGRun.Active()
+    if live == nil then
+        return
+    end
+
+    --A pitfall is settled instead of a roll, so an argument already out with a
+    --player is void. The request lives in the engine rather than the document,
+    --so it has to be dropped before the mutation clears what names it.
+    local res = live:try_get("resolution")
+    local voided = res ~= nil and res.track == NEGConstants.trackArgument
+    if voided and res.actionId ~= nil then
+        dmhub.CancelActionRequest(res.actionId)
+    end
+
+    local outcome = NEGRules.PitfallOutcome()
+
+    NEGRun.Mutate("Negotiation pitfall", function(data)
+        local target = data.live
+        if target == nil then
+            return
+        end
+
+        if voided then
+            target.resolution = nil
+        end
+
+        --Copied before write: a live that never got its own table would
+        --otherwise mutate the type's shared default.
+        local revealed = {}
+        for key, value in pairs(target.revealedTraits) do
+            revealed[key] = value
+        end
+        revealed[rowId] = true
+        target.revealedTraits = revealed
+
+        target.interest = NEGConstants.Clamp(target.interest + outcome.interest,
+            NEGConstants.scaleMin, NEGConstants.scaleMax)
+        target.patience = NEGConstants.Clamp(target.patience + outcome.patience,
+            NEGConstants.scaleMin, NEGConstants.scaleMax)
+
+        --Interest moved, so the offer moved with it.
+        target.offerShared = false
+
+        ClearTrack(target, NEGConstants.trackArgument,
+            { NEGConstants.slotLead, NEGConstants.slotAssist })
+    end)
+
+    printf("NEG:: pitfall %s - interest%+d patience%+d",
+        tostring(rowId), outcome.interest, outcome.patience)
+end
+
 --- @return boolean
 function NEGRun.IsPresented()
     local live = NEGRun.Active()
@@ -784,6 +853,51 @@ end
 -- ASKING A PLAYER TO ROLL
 --==============================================================================
 
+--- The Director's answer for the request now out, or nil. Client-local by
+--- nature: the resultTable belongs to their own summary dialog, and only their
+--- client harvests. A reload drops it, which PumpRolls reads as the dialog
+--- never having been there and falls back to harvesting on completion.
+--- @type nil|{actionId: string, resultTable: table}
+local g_pending = nil
+
+--- Turn a grant that crossed the wire into something the roll dialog will take.
+--- Appending a bare modifier would raise: the dialog reads `.modifier` off each
+--- entry, so this runs the same wrapper sequence the engine does. Nil when the
+--- pipeline declines it, which is not an error.
+--- @param creature any the roller, in hand on their own client
+--- @param options table attribute and skills, as the pipeline wants them
+--- @param modtype string "edge", "double_edge", "bane"
+--- @param name string
+--- @param description string
+--- @return table|nil
+local function DescribeGrant(creature, options, modtype, name, description)
+    local m = CharacterModifier.new{
+        behavior = "power",
+        rollType = NEGConstants.modifierRollType,
+        modtype = modtype,
+        activationCondition = true,
+        guid = dmhub.GenerateGuid(),
+        name = name,
+        description = description,
+        keywords = {},
+    }
+
+    local entry = { mod = m }
+    local described = m:DescribeModifyPowerRoll(entry, creature,
+        NEGConstants.modifierRollType, options)
+    if described == nil then
+        return nil
+    end
+
+    described.hint = described.modifier:HintModifyPowerRolls(entry, creature,
+        NEGConstants.modifierRollType, options)
+    if described.hint == nil then
+        return nil
+    end
+
+    return described
+end
+
 --- The player-facing roll. Two independent axes meet here: `rollType` picks
 --- the dialog, while GetModifiers passes a type from the modifier pipeline's
 --- own closed vocabulary. A private id on that second axis silently drops
@@ -820,33 +934,29 @@ RollCheck.RegisterCustom{
             end
         end
 
-        --The grant crosses the wire as a plain id and becomes a modifier here,
-        --where the lead's creature is in hand. Appending it raw would raise:
-        --the dialog reads `.modifier` off each entry, so it goes through the
-        --same wrapper sequence the engine uses.
+        --Both grants cross the wire as flat scalars and become modifiers here,
+        --where the roller's creature is in hand. They stack: an assisted lead
+        --leaning on their Renown carries the assist's grant and the edge.
+        local options = { attribute = check.info.attrid, skills = check.skills }
+
         local grant = check.info.assistGrant
         if grant ~= nil and grant ~= "" then
-            local options = { attribute = check.info.attrid, skills = check.skills }
-            local m = CharacterModifier.new{
-                behavior = "power",
-                rollType = NEGConstants.modifierRollType,
-                modtype = grant,
-                activationCondition = true,
-                guid = dmhub.GenerateGuid(),
-                name = check.info.assistName or "Assisted",
-                description = check.info.assistDescription or "An ally assisted this test.",
-                keywords = {},
-            }
-
-            local entry = { mod = m }
-            local described = m:DescribeModifyPowerRoll(entry, creature,
-                NEGConstants.modifierRollType, options)
+            local described = DescribeGrant(creature, options, grant,
+                check.info.assistName or "Assisted",
+                check.info.assistDescription or "An ally assisted this test.")
             if described ~= nil then
-                described.hint = described.modifier:HintModifyPowerRolls(entry, creature,
-                    NEGConstants.modifierRollType, options)
-                if described.hint ~= nil then
-                    result[#result + 1] = described
-                end
+                result[#result + 1] = described
+            end
+        end
+
+        --Leaning on Renown is always an edge, so the wire carries only that it
+        --is on.
+        if check.info.renownEdge == true then
+            local described = DescribeGrant(creature, options, "edge",
+                "Renown",
+                "You leaned on your Renown to make this argument, for an edge.")
+            if described ~= nil then
+                result[#result + 1] = described
             end
         end
 
@@ -891,9 +1001,10 @@ function NEGRun.AssistGrant(tier)
     return "bane"
 end
 
---- What a roller is shown before they roll. An assist always gets its real
---- ladder, which gives nothing away. The rest get vague bands unless the
---- negotiation is open, because the real ladder leaks the NPC's motivations.
+--- What a roller is shown before they roll. An assist and a read of the room
+--- always get their real ladders, which give nothing away. An argument gets
+--- vague bands unless the negotiation is open, because its real ladder is read
+--- against this NPC's motivations and so leaks them.
 --- @param live NEGLive
 --- @param slot string
 --- @param track string
@@ -908,6 +1019,13 @@ local function TiersFor(live, slot, track)
                 string.gsub(grant, "_", " "))
         end
         return tiers
+    end
+
+    --Every NPC's read-the-room ladder is the same three results, so it gives
+    --nothing away and is never withheld. The argument ladder is the one that
+    --leaks: it is read against this NPC's own motivations.
+    if track == NEGConstants.trackLearn then
+        return NEGRules.TierText(track, false)
     end
 
     if live:try_get("open", false) then
@@ -962,14 +1080,33 @@ local function SendRequest(live, slot, track, grant, grantFrom)
             assistDescription = grant ~= nil
                 and string.format("%s's assist gave you a %s.",
                     grantFrom or "An ally", string.gsub(grant, "_", " ")) or nil,
+
+            --Carried on the seat, so each roller answers only for their own
+            --Renown. A seat with no toggle never sets it.
+            renownEdge = entry.renownEdge == true,
         },
     }
 
-    return dmhub.SendActionRequest(RollRequest.new{
+    local actionId = dmhub.SendActionRequest(RollRequest.new{
         title = title,
         checks = { check },
         tokens = { [entry.charid] = {} },
     })
+
+    --The Director gets the game's own roll summary over the board, which is
+    --what brings Re-roll and Take Roll to a negotiation test. Its Proceed is
+    --what accepts the roll, so the resultTable is kept rather than discarded:
+    --PumpRolls waits on it instead of on the roll completing.
+    local hud = actionId ~= nil and GameHud.instance or nil
+    if hud then
+        local resultTable = {}
+        hud:ShowRollSummaryDialog(actionId, resultTable)
+        g_pending = { actionId = actionId, resultTable = resultTable }
+    else
+        g_pending = nil
+    end
+
+    return actionId
 end
 
 --- Whether this client may move this hero. The Director may move anyone; a
@@ -1095,6 +1232,11 @@ end
 function NEGRun.CancelRoll()
     local live = NEGRun.Active()
     local res = live ~= nil and live:try_get("resolution") or nil
+
+    --Dropped before the request goes, so the dialog's dying `result = false`
+    --is never read back against a request that no longer exists.
+    g_pending = nil
+
     if res ~= nil and res.actionId ~= nil then
         dmhub.CancelActionRequest(res.actionId)
     end
@@ -1123,42 +1265,91 @@ function NEGRun.PumpRolls()
         return
     end
 
-    local req = dmhub.GetPlayerActionRequest(res.actionId)
-
-    --A request cleared out from under us takes its roll with it. Treat that as
-    --never having asked: the Director presses the die again.
-    if req == nil then
+    --- Forget the request without recording anything against it.
+    local function Abandon()
         NEGRun.Mutate("Clear negotiation roll", function(data)
             if data.live ~= nil then
                 data.live.resolution = nil
             end
         end)
-        return
     end
 
-    local info = req.info.tokens[res.actionFor]
+    --Held before the request is read. Proceed cancels the request on its way
+    --out, so by the time this pump next runs the request is ALREADY GONE - and
+    --a missing request must not be read as an abandoned roll while an answer
+    --is waiting. That ordering is the whole reason this sits up here.
+    local answer = nil
+    if g_pending ~= nil and g_pending.actionId == res.actionId then
+        answer = g_pending.resultTable
+    end
+
+    local req = dmhub.GetPlayerActionRequest(res.actionId)
+    local info = req ~= nil and req.info.tokens[res.actionFor] or nil
     local status = info ~= nil and info.status or nil
 
+    --A player who dismissed their own roll takes the request down with them,
+    --which closes the summary dialog too.
     if status == "cancel" then
         NEGRun.CancelRoll()
         return
     end
 
-    if status ~= "complete" then
+    --Where the numbers come from, and whether it is time to take them. With a
+    --summary dialog up, the Director's Proceed is what accepts the roll: a
+    --completed roll sits there unrecorded so Re-roll and Take Roll still have
+    --a live request to act on, and so a roll about to be thrown away has not
+    --already moved the scales.
+    local tokenInfo = nil
+
+    if answer ~= nil then
+        --Still on the Director's desk.
+        if answer.result == nil then
+            return
+        end
+
+        g_pending = nil
+
+        --Cancelled while incomplete, or the dialog was dismissed. It dropped
+        --the request on its way out, so there is nothing left to cancel.
+        if answer.result ~= true or answer.action == nil then
+            Abandon()
+            return
+        end
+
+        --Snapshotted before the dialog cancelled the request, which is what
+        --makes this safe to read now.
+        tokenInfo = answer.action.info.tokens[res.actionFor]
+    else
+        --No dialog: a reload took it, or there was no hud to show one. Harvest
+        --on completion, as this pump always did, and treat a request cleared
+        --out from under us as never having been asked.
+        if req == nil then
+            Abandon()
+            return
+        end
+
+        if status ~= "complete" then
+            return
+        end
+
+        tokenInfo = info
+        dmhub.CancelActionRequest(res.actionId)
+    end
+
+    if tokenInfo == nil or tokenInfo.status ~= "complete" then
+        Abandon()
         return
     end
 
     --Tier comes from the numbers the request carries, not from the total
     --alone: two edges bump the tier without moving it.
     local rollInfo = {
-        total = info.result,
-        naturalRoll = info.naturalRoll,
-        boons = info.boons,
-        banes = info.banes,
+        total = tokenInfo.result,
+        naturalRoll = tokenInfo.naturalRoll,
+        boons = tokenInfo.boons,
+        banes = tokenInfo.banes,
     }
     local tier = RollUtils.DiceResultToTier(rollInfo)
-
-    dmhub.CancelActionRequest(res.actionId)
 
     local wasAssist = res.slot == NEGConstants.slotAssist
     local track = res.track
