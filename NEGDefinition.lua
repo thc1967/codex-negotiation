@@ -39,7 +39,12 @@ end
 --- @field showInterest boolean whether the table sees the interest scale
 --- @field showPatience boolean whether the table sees the patience scale
 --- @field folderId string
+--- @field slug string a name-derived key, unique across the library
 NEGDefinition = RegisterGameType("NEGDefinition")
+
+--- Declared on the type so a negotiation authored before slugs existed reads
+--- as "" rather than raising, which is what EnsureSlug backfills from.
+NEGDefinition.slug = ""
 
 NEGDefinition.name = "New Negotiation"
 NEGDefinition.npcName = ""
@@ -275,6 +280,57 @@ function NEGDefinition.SetFolder(defid, folderId)
     end)
 end
 
+--- The readable half of a slug: lowercased, every run of non-alphanumerics
+--- collapsed to one dash, ends trimmed.
+--- @param name nil|string
+--- @return string
+local function Slugify(name)
+    local s = string.lower(trim(name or ""))
+    s = string.gsub(s, "[^%w]+", "-")
+    s = string.gsub(s, "^%-+", "")
+    s = string.gsub(s, "%-+$", "")
+    if s == "" then
+        s = "negotiation"
+    end
+    return s
+end
+
+--- This name's slug, disambiguated against every OTHER negotiation's. Takes
+--- the library table rather than reading it back, because it runs inside a
+--- mutation - and because the -2 suffix has to be settled against one view of
+--- the library. Derived at read time it would ride on pairs() order, and two
+--- negotiations sharing a name could swap suffixes between calls.
+--- @param defs table the whole library, mid-mutation
+--- @param id string the negotiation being named
+--- @param name nil|string
+--- @return string
+local function UniqueSlug(defs, id, name)
+    local base = Slugify(name)
+
+    local taken = {}
+    for otherId, def in pairs(defs) do
+        if otherId ~= id and type(def) == "table" then
+            local slug = def.slug
+            if type(slug) == "string" and slug ~= "" then
+                taken[slug] = true
+            end
+        end
+    end
+
+    if not taken[base] then
+        return base
+    end
+
+    local counter = 1
+    while true do
+        counter = counter + 1
+        local candidate = string.format("%s-%d", base, counter)
+        if not taken[candidate] then
+            return candidate
+        end
+    end
+end
+
 --- @param name nil|string
 --- @return string id
 function NEGDefinition.CreateInLibrary(name)
@@ -286,6 +342,7 @@ function NEGDefinition.CreateInLibrary(name)
     }
     NEGDefinition.Mutate("Create negotiation", function(defs)
         defs[def:GetID()] = def
+        def.slug = UniqueSlug(defs, def:GetID(), def.name)
     end)
     return def:GetID()
 end
@@ -302,6 +359,7 @@ function NEGDefinition.Duplicate(id)
     copy.name = string.format("%s (copy)", source.name or "Negotiation")
     NEGDefinition.Mutate("Duplicate negotiation", function(defs)
         defs[copy.id] = copy
+        copy.slug = UniqueSlug(defs, copy.id, copy.name)
     end)
     return copy.id
 end
@@ -323,8 +381,54 @@ function NEGDefinition.SetField(id, key, value)
         local def = defs[id]
         if def ~= nil and def[key] ~= value then
             def[key] = value
+
+            --The slug tracks the current name, so a rename re-derives it.
+            --Anything already holding the old slug stops resolving; that is
+            --the chosen behaviour, not an oversight.
+            if key == "name" then
+                def.slug = UniqueSlug(defs, id, value)
+            end
         end
     end)
+end
+
+--- The negotiation carrying this slug, or nil.
+--- @param slug string
+--- @return NEGDefinition|nil
+function NEGDefinition.GetBySlug(slug)
+    if type(slug) ~= "string" or slug == "" then
+        return nil
+    end
+    for _, def in ipairs(NEGDefinition.GetAll()) do
+        if def.slug == slug then
+            return def
+        end
+    end
+    return nil
+end
+
+--- This negotiation's slug, stamping one first if it predates the field. Saves
+--- every caller having to cope with an empty string.
+--- @param id string
+--- @return string
+function NEGDefinition.EnsureSlug(id)
+    local def = NEGDefinition.GetByID(id)
+    if def == nil then
+        return ""
+    end
+    if def.slug ~= "" then
+        return def.slug
+    end
+
+    NEGDefinition.Mutate("Assign negotiation slug", function(defs)
+        local target = defs[id]
+        if target ~= nil and target.slug == "" then
+            target.slug = UniqueSlug(defs, id, target.name)
+        end
+    end)
+
+    local stamped = NEGDefinition.GetByID(id)
+    return stamped ~= nil and stamped.slug or ""
 end
 
 --- Picking an attitude is picking its opening numbers. Both stay editable
@@ -651,7 +755,16 @@ function NEGDefinition.ImportFromJson(text)
     if type(data.offers) == "table" then
         local offers = EmptyOffers()
         for interest = NEGConstants.scaleMin, NEGConstants.scaleMax do
-            local value = data.offers[tostring(interest)] or data.offers[interest]
+            --FromJson collapses an object keyed "0".."5" into a 1-BASED array,
+            --so the string keys never arrive and interest N lands at N+1 -
+            --which is how offers are stored anyway. Reading [interest] instead
+            --shifted the whole ladder down a rung: 0 came out blank and the
+            --"5" offer fell off the end. The string lookup stays first for a
+            --parser that does preserve keys.
+            local value = data.offers[tostring(interest)]
+            if value == nil then
+                value = data.offers[interest + 1]
+            end
             if type(value) == "string" then
                 offers[interest + 1] = value
             end
@@ -668,6 +781,7 @@ function NEGDefinition.ImportFromJson(text)
 
     NEGDefinition.Mutate("Import negotiation", function(defs)
         defs[def:GetID()] = def
+        def.slug = UniqueSlug(defs, def:GetID(), def.name)
     end)
 
     return { ok = true, defid = def:GetID(), name = name, messages = messages }
