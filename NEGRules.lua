@@ -313,6 +313,186 @@ function NEGRules.TierText(track, motivation)
     return tiers
 end
 
+--- What a closed negotiation is worth. Any Yes is one Victory; anything short
+--- of one is none. The Director may overtype it.
+--- @param interest number the interest it closed on
+--- @return number
+function NEGRules.SuggestedVictories(interest)
+    return cond(NEGConstants.Clamp(interest,
+        NEGConstants.scaleMin, NEGConstants.scaleMax) >= 3, 1, 0)
+end
+
+--- Count a list into "twice" / "three times" rather than "2".
+--- @param n number
+--- @return string
+local function Times(n)
+    if n == 1 then
+        return "once"
+    end
+    if n == 2 then
+        return "twice"
+    end
+    return string.format("%d times", n)
+end
+
+--- The closing report: the suggested award and the sections the Director
+--- reads out. Pure - walks the Run's history and touches nothing.
+--- @param live NEGLive
+--- @return {victories: number, sections: {title: string, entries: string[]}[]}
+function NEGRules.BuildEnding(live)
+    local history = live:try_get("history", {})
+
+    local arguments, reads, pitfalls = 0, 0, 0
+    local bestTier, bestBy = nil, nil
+    local motivationCount, pitfallCount = 0, {}
+    local byChar = {}
+
+    local function Row(charid)
+        if charid == nil then
+            return nil
+        end
+        if byChar[charid] == nil then
+            byChar[charid] = { charid = charid, led = 0, assisted = 0, read = 0 }
+        end
+        return byChar[charid]
+    end
+
+    for _, entry in ipairs(history) do
+        if entry.kind == "argument" then
+            arguments = arguments + 1
+            if entry.motivation then
+                motivationCount = motivationCount + 1
+            end
+            if entry.tier ~= nil and (bestTier == nil or entry.tier > bestTier) then
+                bestTier = entry.tier
+                bestBy = entry.lead
+            end
+        elseif entry.kind == "read" then
+            reads = reads + 1
+        elseif entry.kind == "pitfall" then
+            pitfalls = pitfalls + 1
+            if entry.traitId ~= nil then
+                pitfallCount[entry.traitId] = (pitfallCount[entry.traitId] or 0) + 1
+            end
+        end
+
+        --A pitfall is not an argument led: nobody rolled, the Director just
+        --said it happened. The seats are kept on the entry for the record.
+        if entry.kind ~= "pitfall" then
+            local lead = Row(entry.lead)
+            if lead ~= nil then
+                lead.led = lead.led + 1
+            end
+            local assist = Row(entry.assist)
+            if assist ~= nil then
+                assist.assisted = assist.assisted + 1
+            end
+        end
+        local reader = Row(entry.reader)
+        if reader ~= nil then
+            reader.read = reader.read + 1
+        end
+    end
+
+    local sections = {}
+
+    local function Section(title, entries)
+        if #entries > 0 then
+            sections[#sections + 1] = { title = title, entries = entries }
+        end
+    end
+
+    local def = live:Definition()
+    local openInterest = def ~= nil and def:try_get("interest", NEGDefinition.interest)
+        or NEGDefinition.interest
+    local openPatience = (def ~= nil and def:try_get("patience", NEGDefinition.patience)
+        or NEGDefinition.patience) + live:try_get("languageBonus", 0)
+
+    local went = {}
+    if arguments > 0 or reads > 0 then
+        local parts = {}
+        if arguments > 0 then
+            parts[#parts + 1] = string.format("%d argument%s",
+                arguments, cond(arguments == 1, "", "s"))
+        end
+        if reads > 0 then
+            parts[#parts + 1] = string.format("%d read%s of the room",
+                reads, cond(reads == 1, "", "s"))
+        end
+        went[#went + 1] = table.concat(parts, ", ")
+    else
+        went[#went + 1] = "Nothing was rolled."
+    end
+
+    went[#went + 1] = string.format("Interest %d to %d, patience %d to %d",
+        openInterest, live.interest, openPatience, live.patience)
+
+    if bestTier ~= nil then
+        local who = ""
+        if bestBy ~= nil then
+            who = NEGRun.ParticipantName(live, bestBy)
+        end
+        went[#went + 1] = string.format("Best roll: tier %d%s", bestTier,
+            cond(who ~= "", string.format(", %s", who), ""))
+    end
+    Section("How It Went", went)
+
+    local motivations = {}
+    if motivationCount > 0 then
+        motivations[#motivations + 1] = string.format("Appealed to a motivation %s",
+            Times(motivationCount))
+    end
+    local plain = arguments - motivationCount
+    if plain > 0 then
+        motivations[#motivations + 1] = string.format("Argued without one %s", Times(plain))
+    end
+    Section("Motivations", motivations)
+
+    local pitfallLines = {}
+    for traitId, n in pairs(pitfallCount) do
+        pitfallLines[#pitfallLines + 1] = string.format("Walked into %s %s",
+            NEGRules.TraitName(traitId), Times(n))
+    end
+    table.sort(pitfallLines)
+    Section("Pitfalls", pitfallLines)
+
+    local spoke = {}
+    local rows = {}
+    for _, row in pairs(byChar) do
+        rows[#rows + 1] = row
+    end
+    table.sort(rows, function(a, b)
+        if a.led ~= b.led then
+            return a.led > b.led
+        end
+        return string.lower(NEGRun.ParticipantName(live, a.charid))
+            < string.lower(NEGRun.ParticipantName(live, b.charid))
+    end)
+
+    for _, row in ipairs(rows) do
+        local parts = {}
+        if row.led > 0 then
+            parts[#parts + 1] = string.format("led %d", row.led)
+        end
+        if row.assisted > 0 then
+            parts[#parts + 1] = string.format("assisted %d", row.assisted)
+        end
+        if row.read > 0 then
+            parts[#parts + 1] = string.format("read the room %s", Times(row.read))
+        end
+        if #parts > 0 then
+            spoke[#spoke + 1] = string.format("%s - %s",
+                NEGRun.ParticipantName(live, row.charid), table.concat(parts, ", "))
+        end
+    end
+    Section("Who Spoke", spoke)
+
+    return {
+        victories = NEGRules.SuggestedVictories(live.interest),
+        sections = sections,
+    }
+end
+
 --- Impression scores with the rulebook's example NPCs, which is what makes the
 --- number mean something. The examples lead with the most recognisable so the
 --- closed dropdown still reads; none of the book's examples are dropped.

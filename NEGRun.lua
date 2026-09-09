@@ -83,6 +83,35 @@ NEGLive.learnLocked = false
 --- The journal page that launched this, so ending it can tick that Run row.
 NEGLive.launchedFromDocid = ""
 
+--- Every resolved argument, read and pitfall, in order. The slots and rolls
+--- are cleared for the next argument, so this is the only thing that remembers
+--- the negotiation happened. In memory with the Run; nothing is written out.
+--- @type {kind: string, tier: number|nil, motivation: boolean, traitId: string|nil,
+---        lead: string|nil, assist: string|nil, reader: string|nil,
+---        interestDelta: number, patienceDelta: number}[]
+NEGLive.history = {}
+
+--- The frozen closing report, built once when the negotiation ends.
+NEGLive.ending = nil
+
+--- The assist's roller, held between the assist's roll and the lead's so the
+--- pair land as one history entry. Cleared as that entry is written.
+NEGLive.assistPending = nil
+
+--- Append one settled event to the Run's history. Runs INSIDE a mutation, on
+--- the live it is handed; copies before writing so a Run that never got its
+--- own table cannot write into the type's shared default.
+--- @param live NEGLive
+--- @param entry table
+local function AppendHistory(live, entry)
+    local history = {}
+    for i, existing in ipairs(live.history) do
+        history[i] = existing
+    end
+    history[#history + 1] = entry
+    live.history = history
+end
+
 --- Heroes on the map, and only those. The engine's prompt gate tests
 --- `dmhub.GetTokenById(tokid) ~= nil` OUTSIDE its forceuserid disjunct
 --- (Draw Steel UI/DSRequestRollsDialog.lua), and that call is loaded-map only,
@@ -793,6 +822,18 @@ function NEGRun.HitPitfall(rowId)
         --Interest moved, so the offer moved with it.
         target.offerShared = false
 
+        local lead = target.slots[NEGConstants.slotLead]
+        local assist = target.slots[NEGConstants.slotAssist]
+        AppendHistory(target, {
+            kind = "pitfall",
+            motivation = false,
+            traitId = rowId,
+            lead = lead ~= nil and lead.charid or nil,
+            assist = assist ~= nil and assist.charid or nil,
+            interestDelta = outcome.interest,
+            patienceDelta = outcome.patience,
+        })
+
         ClearTrack(target, NEGConstants.trackArgument,
             { NEGConstants.slotLead, NEGConstants.slotAssist })
     end)
@@ -841,12 +882,205 @@ function NEGRun.End()
         if data.live ~= nil then
             data.live.status = NEGConstants.statusEnded
             data.live.resolution = nil
+
+            --Frozen here: the report reads the history and the scales as they
+            --stood at the close, and the Director may still move the pips
+            --afterwards without rewriting what happened.
+            data.live.ending = NEGRules.BuildEnding(data.live)
         end
     end)
 
     if live ~= nil then
         MarkRunItemDone(live:try_get("launchedFromDocid", ""))
     end
+end
+
+--- @param victories number
+function NEGRun.SetEndingVictories(victories)
+    local live = NEGRun.Active()
+    local ending = live ~= nil and live:try_get("ending") or nil
+    if ending == nil then
+        return
+    end
+
+    local value = math.max(0, math.floor(victories or 0))
+    if ending.victories == value then
+        return
+    end
+
+    NEGRun.Mutate("Set Victory award", function(data)
+        local e = data.live ~= nil and data.live:try_get("ending") or nil
+        if e ~= nil then
+            e.victories = value
+        end
+    end)
+end
+
+--- Hand the Victories out, once. SetVictories is an absolute write, so without
+--- the flag a second press would award them all over again.
+function NEGRun.AwardVictories()
+    local live = NEGRun.Active()
+    local ending = live ~= nil and live:try_get("ending") or nil
+    if ending == nil or ending.awarded == true then
+        return
+    end
+
+    local amount = ending.victories or 0
+    local awardedTo = {}
+
+    for _, charid in ipairs(live:IncludedCharids()) do
+        local token = dmhub.GetCharacterById(charid)
+        if token ~= nil then
+            awardedTo[#awardedTo + 1] = NEGRun.ParticipantName(live, charid)
+            token:ModifyProperties{
+                description = "Award Victories",
+                combine = true,
+                execute = function()
+                    token.properties:SetVictories(token.properties:GetVictories() + amount)
+                end,
+            }
+        end
+    end
+
+    NEGRun.Mutate("Award Victories", function(data)
+        local e = data.live ~= nil and data.live:try_get("ending") or nil
+        if e ~= nil then
+            e.awarded = true
+            e.awardedTo = awardedTo
+        end
+    end)
+end
+
+--- Who did what, for the celebration's cards.
+--- @param live NEGLive
+--- @return table[]
+function NEGRun.BuildRecap(live)
+    local rows = {}
+    local byChar = {}
+
+    for _, charid in ipairs(live:IncludedCharids()) do
+        local row = {
+            charid = charid,
+            name = NEGRun.ParticipantName(live, charid),
+            led = 0,
+            assisted = 0,
+            read = 0,
+            bestTier = nil,
+        }
+        byChar[charid] = row
+        rows[#rows + 1] = row
+    end
+
+    for _, entry in ipairs(live:try_get("history", {})) do
+        --A pitfall is not an argument led: nobody rolled for it.
+        if entry.kind ~= "pitfall" then
+            local lead = entry.lead ~= nil and byChar[entry.lead] or nil
+            if lead ~= nil then
+                lead.led = lead.led + 1
+                if entry.tier ~= nil
+                    and (lead.bestTier == nil or entry.tier > lead.bestTier) then
+                    lead.bestTier = entry.tier
+                end
+            end
+
+            local assist = entry.assist ~= nil and byChar[entry.assist] or nil
+            if assist ~= nil then
+                assist.assisted = assist.assisted + 1
+            end
+        end
+
+        local reader = entry.reader ~= nil and byChar[entry.reader] or nil
+        if reader ~= nil then
+            reader.read = reader.read + 1
+        end
+    end
+
+    table.sort(rows, function(a, b)
+        if a.led ~= b.led then
+            return a.led > b.led
+        end
+        if a.assisted ~= b.assisted then
+            return a.assisted > b.assisted
+        end
+        return string.lower(a.name) < string.lower(b.name)
+    end)
+
+    return rows
+end
+
+--- Everything the celebration needs, detached from the Run. The Run is cleared
+--- the moment the report goes out, so the report cannot read it.
+--- @param live NEGLive
+--- @return table
+function NEGRun.BuildReportPayload(live)
+    local interest = NEGConstants.Clamp(live.interest,
+        NEGConstants.scaleMin, NEGConstants.scaleMax)
+
+    return {
+        name = live:Name(),
+        npcName = live:NpcName(),
+        result = NEGRules.OfferName(interest),
+        detail = live:OfferText(),
+        interest = interest,
+        patience = live.patience,
+        ending = DeepCopy(live:try_get("ending", {})),
+        recap = NEGRun.BuildRecap(live),
+    }
+end
+
+--- Throw the NPC's name across every screen with the sword reveal, so the
+--- report arrives as an event rather than a window appearing.
+--- @param payload table
+function NEGRun.AnnounceEnding(payload)
+    local subtitle = payload.result
+    local victories = payload.ending ~= nil and payload.ending.victories or 0
+    if victories > 0 then
+        subtitle = string.format("%s  -  %d %s", subtitle, victories,
+            cond(victories == 1, "Victory", "Victories"))
+    end
+
+    DramaticBanner.Show{
+        text = cond(payload.npcName ~= "", payload.npcName, payload.name),
+        subtitle = subtitle,
+    }
+end
+
+--- Send the celebration to every client, the Director included. It travels as
+--- a payload rather than a pointer at the Run, so clearing the Run in the same
+--- breath cannot empty it out from under the table.
+--- @param payload table
+function NEGRun.PresentReport(payload)
+    GameHud.PresentDialogToUsers(GameHud.instance.parentPanel,
+        NEGConstants.dialogId, { report = payload, ttl = NEGConstants.celebrationTTL })
+end
+
+--- The Director is done. Award, announce with the banner, clear the
+--- negotiation, and let the celebration land as the banner draws off.
+function NEGRun.CompleteRun()
+    if NEGRun.Active() == nil then
+        return
+    end
+
+    --Award before the snapshot, so the celebration carries who got what.
+    NEGRun.AwardVictories()
+
+    local live = NEGRun.Active()
+    if live == nil then
+        return
+    end
+
+    local payload = NEGRun.BuildReportPayload(live)
+
+    NEGRun.AnnounceEnding(payload)
+    NEGRun.Clear()
+    LaunchablePanel.LaunchPanelByName(NEGConstants.panelName, "hide")
+
+    dmhub.Schedule(DramaticBanner.holdTime, function()
+        if mod.unloaded then
+            return
+        end
+        NEGRun.PresentReport(payload)
+    end)
 end
 
 --==============================================================================
@@ -1416,6 +1650,25 @@ function NEGRun.PumpRolls()
                     target.patience + outcome.patience,
                     NEGConstants.scaleMin, NEGConstants.scaleMax)
             end
+        end
+
+        --The assist folds into the lead's entry rather than becoming its own,
+        --so "led 2, assisted 1" counts without counting the argument twice.
+        if wasAssist then
+            target.assistPending = res.actionFor
+        else
+            local assistCharid = target:try_get("assistPending")
+            AppendHistory(target, {
+                kind = cond(track == NEGConstants.trackLearn, "read", "argument"),
+                tier = tier,
+                motivation = target.appealMotivation == true,
+                lead = cond(track == NEGConstants.trackLearn, nil, res.actionFor),
+                reader = cond(track == NEGConstants.trackLearn, res.actionFor, nil),
+                assist = assistCharid,
+                interestDelta = outcome ~= nil and outcome.interest or 0,
+                patienceDelta = outcome ~= nil and outcome.patience or 0,
+            })
+            target.assistPending = nil
         end
     end)
 

@@ -586,6 +586,161 @@ function NEGWidgets.Overlay(text, sizeClass, hostLevels, inset)
     }
 end
 
+--- A section heading inside the closing report.
+--- @param text string
+--- @param sizeClass nil|string
+--- @return Panel
+function NEGWidgets.SubHeader(text, sizeClass)
+    return gui.Label{
+        classes = { "tableLabel", sizeClass or "sizeXs" },
+        width = "100%",
+        height = "auto",
+        valign = "top",
+        tmargin = 8,
+        text = text,
+    }
+end
+
+--- Grow a container to hold one panel per item, then hand each panel its item.
+--- Panels are kept and rebound rather than rebuilt, so a rebuild costs nothing
+--- once the list has settled.
+--- @param container Panel
+--- @param items table[]
+--- @param build fun(index: number): Panel
+--- @param bindEvent string
+function NEGWidgets.BindList(container, items, build, bindEvent)
+    local panels = container.children or {}
+    if #panels < #items then
+        for i = #panels + 1, #items do
+            panels[i] = build(i)
+        end
+        container.children = panels
+    end
+    for i, panel in ipairs(panels) do
+        panel:FireEvent(bindEvent, items[i], i)
+    end
+end
+
+--- The row BoundRow holds, remade only when its state string moves. An empty
+--- state empties the row.
+--- @param row Panel built by BoundRow
+--- @param state string
+--- @param build fun(): Panel|nil
+--- @return Panel|nil the child now in the row
+function NEGWidgets.SetBoundRow(row, state, build)
+    if row.data.rowState ~= state then
+        row.data.rowState = state
+        if state == "" then
+            row.data.rowChild = nil
+            row.children = {}
+        else
+            local child = build()
+            row.data.rowChild = child
+            row.children = { child }
+        end
+    end
+    return row.data.rowChild
+end
+
+--- A kept panel SetBoundRow fills. NOT NEGWidgets.Slot, which is the hero
+--- placement box on the run board and something else entirely.
+--- @param args nil|table extra panel fields
+--- @return Panel
+function NEGWidgets.BoundRow(args)
+    local panel = {
+        width = "auto",
+        height = "auto",
+        flow = "none",
+        halign = "left",
+        valign = "center",
+        data = {},
+    }
+    for key, value in pairs(args or {}) do
+        panel[key] = value
+    end
+    return gui.Panel(panel)
+end
+
+--- One hero on the celebration screen: their portrait, name, and what they did.
+--- @param row {charid: string, name: string}
+--- @param lines string[]
+--- @return Panel
+function NEGWidgets.RecapCard(row, lines)
+    local token = dmhub.GetCharacterById(row.charid)
+
+    --"image" keeps the portrait true-colour; a bare bgimage is tinted @bg.
+    local portraitPanel = gui.Panel{
+        classes = { "image", "borderInfo" },
+        interactable = false,
+        flow = "none",
+        width = "100%",
+        height = "133.333% width",
+        halign = "center",
+        valign = "top",
+        borderWidth = 2,
+        cornerRadius = 4,
+    }
+
+    if token ~= nil then
+        local portrait = token.inspectPortrait
+        portraitPanel.bgimage = portrait
+        if token.hasSpineAnimation then
+            portraitPanel.selfStyle.imageRect = nil
+        else
+            portraitPanel.selfStyle.imageRect = token:GetPortraitRectForAspect(0.75, portrait)
+        end
+    end
+
+    local children = {
+        portraitPanel,
+
+        gui.Label{
+            classes = { "sizeL" },
+            interactable = false,
+            width = "100%",
+            height = "auto",
+            halign = "center",
+            valign = "top",
+            tmargin = 6,
+            textAlignment = "center",
+            textWrap = true,
+            text = row.name or "",
+        },
+    }
+
+    for _, line in ipairs(lines) do
+        children[#children + 1] = gui.Label{
+            classes = { "sizeXs", "noBold", "fgMuted" },
+            interactable = false,
+            width = "100%",
+            height = "auto",
+            halign = "center",
+            valign = "top",
+            tmargin = 2,
+            textAlignment = "center",
+            textWrap = true,
+            text = line,
+        }
+    end
+
+    return gui.Panel{
+        classes = { "panel", "surfaceRadial", "border" },
+        interactable = false,
+        flow = "vertical",
+        width = 168,
+        height = "auto",
+        minHeight = 300,
+        halign = "left",
+        valign = "top",
+        margin = 8,
+        cornerRadius = 8,
+        borderWidth = 1,
+        vpad = 10,
+        hpad = 8,
+        children = children,
+    }
+end
+
 --- A line of text where a surface would otherwise be empty. Collapsed until
 --- the caller shows it.
 --- @param message string

@@ -183,6 +183,13 @@ NEGConstants.patienceTone = {
 NEGConstants.toneUnlit = "bgFgMuted"
 
 -- Icons
+--- The award on the closing report, matching the montage's trophy.
+NEGConstants.iconVictory = "drawsteel/HeroicResources/T_UI_ICON_FLAT_HR_VICTORY.png"
+
+--- Seconds the celebration stays presentable. Without a ttl every later reload
+--- would rebuild it.
+NEGConstants.celebrationTTL = 30
+
 NEGConstants.iconEyeShown = "phosphor/eye.png"
 NEGConstants.iconEyeHidden = "phosphor/eye-slash.png"
 NEGConstants.iconNewFolder = "phosphor/folder-plus.png"

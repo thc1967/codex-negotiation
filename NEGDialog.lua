@@ -117,6 +117,7 @@ function NEGDialog.Create()
     local editorPanel = NEGEditorPanel.Create()
     local setupPanel = NEGRunPanel.CreateSetup()
     local runPanel = NEGRunPanel.Create{ director = true }
+    local endingPanel = NEGEndingPanel.Create{ director = true }
 
     --Import takes the pane rather than opening a dialog of its own, so it is a
     --sibling of the editor rather than a layer over it.
@@ -167,9 +168,10 @@ function NEGDialog.Create()
             importPanel:SetClass("collapsed", not m_importing)
             editorPanel:SetClass("collapsed", live ~= nil or m_importing)
             setupPanel.body:SetClass("collapsed", status ~= NEGConstants.statusSetup)
-            runPanel.body:SetClass("collapsed",
-                status ~= NEGConstants.statusRunning
-                and status ~= NEGConstants.statusEnded)
+            --The board gives way to the report at the close, the way a
+            --montage's does; it used to stay up through statusEnded.
+            runPanel.body:SetClass("collapsed", status ~= NEGConstants.statusRunning)
+            endingPanel.body:SetClass("collapsed", status ~= NEGConstants.statusEnded)
         end,
 
         create = function(element)
@@ -180,6 +182,7 @@ function NEGDialog.Create()
         importPanel,
         setupPanel.body,
         runPanel.body,
+        endingPanel.body,
     }
 
     local dlg
@@ -286,19 +289,21 @@ function NEGDialog.Create()
                 click = Close,
             },
         },
-        {},
         {
             slot = gui.Button{
                 classes = { "sizeL" },
                 text = "Back to Library",
-                halign = "right",
+                halign = "center",
                 valign = "center",
-                hover = gui.Tooltip("Take this negotiation off the table"),
+                hover = gui.Tooltip("Take this negotiation off the table, awarding nothing"),
                 click = function()
                     NEGRun.Clear()
                 end,
             },
         },
+        --The panel owns Complete: it is the one that knows what was typed in
+        --the Victories box.
+        endingPanel.footer[3],
     }
 
     --Every state's row is built once and collapsed, the way the right pane's
@@ -452,7 +457,72 @@ end
 --- Returning nothing leaves the presentation machinery with nothing to tear
 --- down, which is what lets the window decide for itself when to go.
 --- @return Panel|nil
-function NEGDialog.RaiseForPlayer()
+--- The closing celebration, a full-screen layer rather than a window: it lands
+--- in the hud's documentsPanel, already a 100% x 100% layer, so it fills the
+--- screen and dims behind itself.
+--- @param report table
+--- @return Panel
+local function CreateCelebrationOverlay(report)
+    local resultPanel
+    resultPanel = gui.Panel{
+        styles = ThemeEngine.GetStyles(),
+        classes = { "negPlayerView" },
+        floating = true,
+        flow = "none",
+        width = "100%",
+        height = "100%",
+        halign = "center",
+        valign = "center",
+        --interactable=false on a parent blocks its whole subtree.
+        interactable = true,
+
+        --Not a DialogShell, so the theme subscription is held by hand.
+        data = {
+            themeSub = nil,
+        },
+
+        create = function(element)
+            element.data.themeSub = ThemeEngine.OnThemeChanged(mod, function()
+                if element.valid then
+                    element.styles = ThemeEngine.GetStyles()
+                end
+            end)
+        end,
+
+        destroy = function(element)
+            if element.data.themeSub ~= nil then
+                element.data.themeSub:Deregister()
+                element.data.themeSub = nil
+            end
+        end,
+
+        gui.Panel{
+            interactable = false,
+            width = "100%",
+            height = "100%",
+            halign = "center",
+            valign = "center",
+            bgimage = "panels/square.png",
+            bgcolor = "#000000d0",
+        },
+
+        NEGEndingPanel.CreateCelebration(report),
+    }
+
+    return resultPanel
+end
+
+--- @param args nil|{report: table|nil}
+--- @return Panel|nil
+function NEGDialog.RaiseForPlayer(args)
+    args = args or {}
+
+    --Ahead of the isDM gate: the celebration goes to the whole table, the
+    --Director included, and by then the Run is already cleared.
+    if args.report ~= nil then
+        return CreateCelebrationOverlay(args.report)
+    end
+
     if dmhub.isDM or NEGRun.Active() == nil then
         return nil
     end
