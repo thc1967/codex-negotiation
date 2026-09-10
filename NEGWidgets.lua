@@ -38,22 +38,23 @@ function NEGWidgets.FormRow(labelText, width, control, hint)
 end
 
 --- What the table sees. Director only.
---- @param args {shown: boolean, change: fun(shown: boolean)}
+--- @param args {shown: boolean, change: fun(shown: boolean), size: nil|number, lmargin: nil|number, tooltipShown: nil|string, tooltipHidden: nil|string}
 --- @return Panel
 function NEGWidgets.EyeToggle(args)
     local shown = args.shown == true
+    local size = args.size or 18
 
     return gui.Panel{
         classes = { cond(shown, "bgFg", "bgFgMuted") },
-        width = 18,
-        height = 18,
+        width = size,
+        height = size,
         halign = "left",
         valign = "center",
-        lmargin = 6,
+        lmargin = args.lmargin or 6,
         bgimage = cond(shown, NEGConstants.iconEyeShown, NEGConstants.iconEyeHidden),
         hover = gui.Tooltip(cond(shown,
-            "The table can see this. Click to hide it.",
-            "Hidden from the table. Click to show it.")),
+            args.tooltipShown or "The table can see this. Click to hide it.",
+            args.tooltipHidden or "Hidden from the table. Click to show it.")),
         press = function()
             args.change(not shown)
         end,
@@ -366,7 +367,7 @@ function NEGWidgets.Tray(entries, onReturn)
 end
 
 --- A place to stand one hero: click for a menu, or drag one in.
---- @param args {label: string, charid: nil|string, name: nil|string, renown: nil|number, inert: boolean, options: {charid: string, name: string}[], place: fun(charid: string), clear: fun()}
+--- @param args {label: string, charid: nil|string, name: nil|string, renown: nil|number, labelTrailing: nil|Panel, inert: boolean, options: {charid: string, name: string}[], place: fun(charid: string), clear: fun()}
 --- @return Panel
 function NEGWidgets.Slot(args)
     local charid = args.charid
@@ -485,14 +486,26 @@ function NEGWidgets.Slot(args)
 
         box,
 
-        gui.Label{
-            classes = { "sizeXs", "noBold", "fgMuted" },
+        gui.Panel{
             width = "100%",
             height = "auto",
+            flow = "horizontal",
             halign = "center",
             valign = "top",
-            textAlignment = "center",
-            text = args.label or "",
+
+            gui.Label{
+                classes = { "sizeXs", "noBold", "fgMuted" },
+                --auto, not 100%: a full-width label would push anything beside
+                --it out to the frame's edge instead of against the text.
+                width = "auto",
+                height = "auto",
+                halign = "center",
+                valign = "center",
+                textAlignment = "center",
+                text = args.label or "",
+            },
+
+            args.labelTrailing,
         },
 
         gui.Label{

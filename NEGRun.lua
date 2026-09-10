@@ -80,6 +80,11 @@ NEGLive.open = false
 --- is made. The rules bar a second read until then.
 NEGLive.learnLocked = false
 
+--- Whether the Assist seat is kept off the players' board. A standing choice
+--- for the whole negotiation, not per argument, so clearing a track leaves it
+--- where the Director put it.
+NEGLive.assistHidden = false
+
 --- The journal page that launched this, so ending it can tick that Run row.
 NEGLive.launchedFromDocid = ""
 
@@ -619,6 +624,15 @@ function NEGRun.SetOpen(value)
     NEGRun.Mutate("Set negotiation openness", function(data)
         if data.live ~= nil then
             data.live.open = value
+        end
+    end)
+end
+
+--- @param hidden boolean
+function NEGRun.SetAssistHidden(hidden)
+    NEGRun.Mutate("Show or hide the assist", function(data)
+        if data.live ~= nil then
+            data.live.assistHidden = hidden == true
         end
     end)
 end

@@ -550,6 +550,22 @@ local function TrackPanel(live, args)
             renown = NEGRules.Renown(entry.charid)
         end
 
+        --Only the Assist can be kept back, and only the Director decides it.
+        local assistEye = nil
+        if args.director and slotKey == NEGConstants.slotAssist then
+            local assistShown = not live:try_get("assistHidden", false)
+            assistEye = NEGWidgets.EyeToggle{
+                shown = assistShown,
+                size = 12,
+                lmargin = 4,
+                tooltipShown = "The table can see the Assist. Click to hide it.",
+                tooltipHidden = "The Assist is hidden from the table. Click to show it.",
+                change = function(shown)
+                    NEGRun.SetAssistHidden(not shown)
+                end,
+            }
+        end
+
         if roll ~= nil then
             --The choices are spent, so what they produced replaces them. Both
             --windows get this: the table watched the dice, they should see the
@@ -717,6 +733,9 @@ local function TrackPanel(live, args)
         end
 
         units[#units + 1] = gui.Panel{
+            classes = { cond(not args.director
+                and slotKey == NEGConstants.slotAssist
+                and live:try_get("assistHidden", false), "collapsed") },
             width = unitWidth,
             height = "auto",
             flow = "horizontal",
@@ -728,6 +747,7 @@ local function TrackPanel(live, args)
                 charid = entry ~= nil and entry.charid or nil,
                 name = entry ~= nil and NEGRun.ParticipantName(live, entry.charid) or "",
                 renown = renown,
+                labelTrailing = assistEye,
                 inert = sealed,
                 options = free,
                 place = function(charid)
