@@ -133,6 +133,13 @@ NEGConstants.scalePatience = "patience"
 NEGConstants.scaleMin = 0
 NEGConstants.scaleMax = 5
 
+--- A devil's Interest track runs twice as long. The offer is still named from
+--- 0..5 - the track is halved to read it - so only the pips and the clamps grow.
+NEGConstants.scaleMaxDevil = 10
+
+--- The Director's switch for it, beside the Interest eye.
+NEGConstants.iconDevil = "phosphor/mask-happy-light.png"
+
 --- A negotiation opens with interest between 1 and 4 and patience above 0, so
 --- the config scales stop short of the values that would end it before it
 --- began. The live scales run the full range.
@@ -156,6 +163,13 @@ NEGConstants.scalePips = {
     [3] = "phosphor/number-circle-three.png",
     [4] = "phosphor/number-circle-four.png",
     [5] = "phosphor/number-circle-five.png",
+    [6] = "phosphor/number-circle-six.png",
+    [7] = "phosphor/number-circle-seven.png",
+    [8] = "phosphor/number-circle-eight.png",
+    [9] = "phosphor/number-circle-nine.png",
+    --Phosphor's numbered circles stop at nine, so the top of a devil's track
+    --wears a check instead.
+    [10] = "phosphor/check-circle-light.png",
 }
 
 --- Which theme class the whole lit run wears, chosen by the value it has

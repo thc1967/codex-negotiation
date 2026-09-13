@@ -537,15 +537,23 @@ function NEGEditorPanel.Create()
             local interest = def:try_get("interest", NEGDefinition.interest)
             local patience = def:try_get("patience", NEGDefinition.patience)
             local langid = def:try_get("languageId", "")
-            local interestCaption, interestClass = NEGWidgets.InterestCaption(interest)
+            local devil = def:try_get("devilInterest", false)
+            local interestMax = NEGRules.InterestMax(devil)
+            local resultInterest = NEGRules.ResultInterest(interest, devil)
+            local interestCaption, interestClass =
+                NEGWidgets.InterestCaption(resultInterest)
 
             scalesPanel.children = {
                 NEGWidgets.Scale{
                     which = NEGConstants.scaleInterest,
                     label = "Interest",
                     value = interest,
-                    minValue = NEGConstants.startInterestMin,
-                    maxValue = NEGConstants.startInterestMax,
+                    pipMax = interestMax,
+                    toneValue = resultInterest,
+                    --Uncapped: a devil opens anywhere on its longer track, and
+                    --the Director is trusted with either end of a normal one.
+                    minValue = NEGConstants.scaleMin,
+                    maxValue = interestMax,
                     interactive = true,
                     caption = interestCaption,
                     captionClass = interestClass,
@@ -556,6 +564,21 @@ function NEGEditorPanel.Create()
                         shown = def:try_get("showInterest", false),
                         change = function(shown)
                             NEGDefinition.SetField(defid, "showInterest", shown)
+                        end,
+                    },
+                    trailing = gui.Panel{
+                        classes = { cond(devil, "bgDanger", "bgFgMuted") },
+                        width = 14,
+                        height = 14,
+                        halign = "left",
+                        valign = "center",
+                        lmargin = 4,
+                        bgimage = NEGConstants.iconDevil,
+                        hover = gui.Tooltip(cond(devil,
+                            "Devil's bargain: Interest runs to 10 and is halved to name the offer. Click for a normal track.",
+                            "Normal Interest. Click for a devil's doubled track.")),
+                        press = function()
+                            NEGDefinition.SetDevilInterest(defid, not devil)
                         end,
                     },
                 },

@@ -98,20 +98,25 @@ end
 --- Bubbles run 0..5 and light from 0 up to the value. 0 is on the scale
 --- because it is a real place to be: interest 0 is "No, and...".
 ---
---- @param args {which: string, label: string, value: number, minValue: nil|number, maxValue: nil|number, interactive: boolean, change: nil|fun(value: number), caption: nil|string, captionClass: nil|string, eye: nil|table, width: nil|string}
+--- @param args {which: string, label: string, value: number, minValue: nil|number, maxValue: nil|number, pipMax: nil|number, interactive: boolean, change: nil|fun(value: number), caption: nil|string, captionClass: nil|string, eye: nil|table, trailing: nil|Panel, width: nil|string}
 --- @return Panel
 function NEGWidgets.Scale(args)
-    local value = NEGConstants.Clamp(args.value,
-        NEGConstants.scaleMin, NEGConstants.scaleMax)
+    --How far the track runs. A devil's Interest reaches 10; patience never
+    --passes its own five, so this defaults to the shared cap.
+    local pipMax = args.pipMax or NEGConstants.scaleMax
+    local value = NEGConstants.Clamp(args.value, NEGConstants.scaleMin, pipMax)
     local minValue = args.minValue or NEGConstants.scaleMin
-    local maxValue = args.maxValue or NEGConstants.scaleMax
+    local maxValue = args.maxValue or pipMax
     local label = args.label or ""
 
     local tones = NEGConstants.patienceTone
     if args.which == NEGConstants.scaleInterest then
         tones = NEGConstants.interestTone
     end
-    local litClass = tones[value] or NEGConstants.toneUnlit
+
+    --The tone bands are 0..5. A devil's track is longer, so its colour comes
+    --from the halved value the caller hands in: 7 of 10 reads like 3 of 5.
+    local litClass = tones[args.toneValue or value] or NEGConstants.toneUnlit
 
     local headerChildren = {
         gui.Label{
@@ -128,8 +133,12 @@ function NEGWidgets.Scale(args)
         headerChildren[#headerChildren + 1] = NEGWidgets.EyeToggle(args.eye)
     end
 
+    if args.trailing ~= nil then
+        headerChildren[#headerChildren + 1] = args.trailing
+    end
+
     local pips = {}
-    for i = NEGConstants.scaleMin, NEGConstants.scaleMax do
+    for i = NEGConstants.scaleMin, pipMax do
         local lit = i <= value and not args.unknown
 
         --Built in one go rather than assigned onto afterwards: hover is fixed
@@ -521,118 +530,8 @@ function NEGWidgets.Slot(args)
     }
 end
 
---- A curtain over whatever hosts it: dims it, swallows clicks, says why.
----
---- `interactable` on a panel with nothing to click is what stops the raycast
---- reaching the controls underneath. The size is measured rather than declared:
---- a host sized to its own content gives a percentage nothing to resolve
---- against, and rendered sizes read 0 until the first layout pass. Append it
---- LAST to the host's children - that is what puts it on top.
---- Collapsed until the caller shows it.
---- @param text string
---- @param sizeClass string
---- @param hostLevels nil|number how far up to measure; 1 (the parent) by default
---- @param inset nil|number the host's padding, which it does not expose
---- @return Panel
-function NEGWidgets.Overlay(text, sizeClass, hostLevels, inset)
-    hostLevels = hostLevels or 1
-    inset = inset or 0
 
-    return gui.Panel{
-        classes = { "bordered", "collapsed" },
-        floating = true,
-        width = "100%",
-        height = "100%",
-        halign = "left",
-        valign = "top",
-        flow = "none",
-        bgimage = true,
 
-        bgcolor = "#000000c0",
-
-        --Stops the raycast reaching the controls underneath.
-        interactable = true,
-
-        --A host sized to its own content gives a percentage nothing to resolve
-        --against, and renderedHeight reads 0 until the first layout pass.
-        thinkTime = 0.2,
-        think = function(element)
-            if element:HasClass("collapsed") then
-                return
-            end
-
-            --A rebuild can leave a stale link up the chain, and reading
-            --anything off a panel whose object has gone raises.
-            local host = element
-            for _ = 1, hostLevels do
-                if host == nil or not host.valid then
-                    return
-                end
-                host = host.parent
-            end
-            if host == nil or not host.valid then
-                return
-            end
-
-            local w = host.renderedWidth
-            local h = host.renderedHeight
-            if w ~= nil and w > 0 and h ~= nil and h > 0 then
-                --Padding counts as part of the host, so its rendered size
-                --includes it while children start inside it. Step back out.
-                element.selfStyle.width = w
-                element.selfStyle.height = h
-                element.x = -inset
-                element.y = -inset
-            end
-        end,
-
-        gui.Label{
-            classes = { sizeClass, "bold" },
-            width = "90%",
-            height = "auto",
-            halign = "center",
-            valign = "center",
-            textAlignment = "center",
-            textWrap = true,
-            text = text,
-        },
-    }
-end
-
---- A section heading inside the closing report.
---- @param text string
---- @param sizeClass nil|string
---- @return Panel
-function NEGWidgets.SubHeader(text, sizeClass)
-    return gui.Label{
-        classes = { "tableLabel", sizeClass or "sizeXs" },
-        width = "100%",
-        height = "auto",
-        valign = "top",
-        tmargin = 8,
-        text = text,
-    }
-end
-
---- Grow a container to hold one panel per item, then hand each panel its item.
---- Panels are kept and rebound rather than rebuilt, so a rebuild costs nothing
---- once the list has settled.
---- @param container Panel
---- @param items table[]
---- @param build fun(index: number): Panel
---- @param bindEvent string
-function NEGWidgets.BindList(container, items, build, bindEvent)
-    local panels = container.children or {}
-    if #panels < #items then
-        for i = #panels + 1, #items do
-            panels[i] = build(i)
-        end
-        container.children = panels
-    end
-    for i, panel in ipairs(panels) do
-        panel:FireEvent(bindEvent, items[i], i)
-    end
-end
 
 --- The row BoundRow holds, remade only when its state string moves. An empty
 --- state empties the row.
@@ -674,108 +573,4 @@ function NEGWidgets.BoundRow(args)
     return gui.Panel(panel)
 end
 
---- One hero on the celebration screen: their portrait, name, and what they did.
---- @param row {charid: string, name: string}
---- @param lines string[]
---- @return Panel
-function NEGWidgets.RecapCard(row, lines)
-    local token = dmhub.GetCharacterById(row.charid)
 
-    --"image" keeps the portrait true-colour; a bare bgimage is tinted @bg.
-    local portraitPanel = gui.Panel{
-        classes = { "image", "borderInfo" },
-        interactable = false,
-        flow = "none",
-        width = "100%",
-        height = "133.333% width",
-        halign = "center",
-        valign = "top",
-        borderWidth = 2,
-        cornerRadius = 4,
-    }
-
-    if token ~= nil then
-        local portrait = token.inspectPortrait
-        portraitPanel.bgimage = portrait
-        if token.hasSpineAnimation then
-            portraitPanel.selfStyle.imageRect = nil
-        else
-            portraitPanel.selfStyle.imageRect = token:GetPortraitRectForAspect(0.75, portrait)
-        end
-    end
-
-    local children = {
-        portraitPanel,
-
-        gui.Label{
-            classes = { "sizeL" },
-            interactable = false,
-            width = "100%",
-            height = "auto",
-            halign = "center",
-            valign = "top",
-            tmargin = 6,
-            textAlignment = "center",
-            textWrap = true,
-            text = row.name or "",
-        },
-    }
-
-    for _, line in ipairs(lines) do
-        children[#children + 1] = gui.Label{
-            classes = { "sizeXs", "noBold", "fgMuted" },
-            interactable = false,
-            width = "100%",
-            height = "auto",
-            halign = "center",
-            valign = "top",
-            tmargin = 2,
-            textAlignment = "center",
-            textWrap = true,
-            text = line,
-        }
-    end
-
-    return gui.Panel{
-        classes = { "panel", "surfaceRadial", "border" },
-        interactable = false,
-        flow = "vertical",
-        width = 168,
-        height = "auto",
-        minHeight = 300,
-        halign = "left",
-        valign = "top",
-        margin = 8,
-        cornerRadius = 8,
-        borderWidth = 1,
-        vpad = 10,
-        hpad = 8,
-        children = children,
-    }
-end
-
---- A line of text where a surface would otherwise be empty. Collapsed until
---- the caller shows it.
---- @param message string
---- @return Panel
-function NEGWidgets.Notice(message)
-    return gui.Panel{
-        classes = { "collapsed" },
-        width = "100%",
-        height = "100% available",
-        flow = "vertical",
-        halign = "center",
-        valign = "center",
-
-        gui.Label{
-            classes = { "sizeL", "noBold", "fgMuted" },
-            width = "80%",
-            height = "auto",
-            halign = "center",
-            valign = "center",
-            textAlignment = "center",
-            textWrap = true,
-            text = message,
-        },
-    }
-end

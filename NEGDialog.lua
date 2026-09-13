@@ -557,45 +557,12 @@ LaunchablePanel.Register{
     end,
 }
 
---Registered only for a Director, so a player has no such command and it never
---reaches their completions.
-if dmhub.isDM then
-    Commands.RegisterMacro{
-        name = "thcnegotiation",
-        summary = "open the negotiation panel",
-        doc = "Usage: /thcnegotiation [slug]\nOpens the Negotiation panel. Given a slug, selects that negotiation.",
-
-        --Reads the stored slug rather than EnsureSlug: completions run per
-        --keystroke and must not write to the library.
-        completions = function(args, argIndex)
-            if argIndex ~= 1 then
-                return {}
-            end
-
-            local result = {}
-            for _, def in ipairs(NEGDefinition.GetAll()) do
-                if def.slug ~= "" then
-                    result[#result + 1] = { text = def.slug, summary = def.name or "" }
-                end
-            end
-            table.sort(result, function(a, b) return a.text < b.text end)
-            return result
-        end,
-
-        command = function(str)
-            local slug = trim(str or "")
-            local defid = nil
-
-            if slug ~= "" then
-                local def = NEGDefinition.GetBySlug(slug)
-                if def ~= nil then
-                    defid = def:GetID()
-                else
-                    dmhub.Log(string.format("thcnegotiation: no negotiation with slug \"%s\".", slug))
-                end
-            end
-
-            NEGDialog.Open(defid)
-        end,
-    }
-end
+--Director-only; RegisterSlugMacro gates it, so a player never sees it in
+--their completions.
+THCCommands.RegisterSlugMacro{
+    name = "thcnegotiation",
+    noun = "negotiation",
+    GetAll = NEGDefinition.GetAll,
+    GetBySlug = NEGDefinition.GetBySlug,
+    Open = NEGDialog.Open,
+}

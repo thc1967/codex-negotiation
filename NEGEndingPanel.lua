@@ -19,7 +19,7 @@ local function ReportLine()
             end
             NEGWidgets.SetBoundRow(row, state, function()
                 if line.kind == "header" then
-                    return NEGWidgets.SubHeader(line.text, "sizeXl")
+                    return THCWidgets.SubHeader(line.text, "sizeXl")
                 end
                 return gui.Label{
                     classes = { "sizeM", "noBold" },
@@ -168,10 +168,10 @@ function NEGEndingPanel.Create(opts)
                     lines[#lines + 1] = { kind = "entry", text = entry }
                 end
             end
-            NEGWidgets.BindList(reportPanel, lines, ReportLine, "setLine")
+            THCWidgets.BindList(reportPanel, lines, ReportLine, "setLine")
 
-            local interest = NEGConstants.Clamp(live.interest,
-                NEGConstants.scaleMin, NEGConstants.scaleMax)
+            --Halved for a devil: the ladder is always read 0..5.
+            local interest = live:ResultInterest()
 
             local result = string.format("**Result:** %s", NEGRules.OfferName(interest))
             if m_resultText ~= result then
@@ -318,7 +318,7 @@ function NEGEndingPanel.CreateCelebration(payload)
         if row.bestTier ~= nil then
             lines[#lines + 1] = string.format("Best Tier %d", row.bestTier)
         end
-        cards[#cards + 1] = NEGWidgets.RecapCard(row, lines)
+        cards[#cards + 1] = THCWidgets.RecapCard(row, lines)
     end
 
     children[#children + 1] = gui.Panel{

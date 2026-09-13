@@ -10,6 +10,11 @@ NEGParticipant = RegisterGameType("NEGParticipant")
 NEGParticipant.name = ""
 NEGParticipant.included = true
 
+--- Absent on every participant stored before companions were carried, so both
+--- default rather than being read with try_get at each site.
+NEGParticipant.isCompanion = false
+NEGParticipant.summonerId = ""
+
 --- @param args nil|table
 --- @return NEGParticipant
 function NEGParticipant.CreateNew(args)
@@ -34,6 +39,11 @@ NEGLive = RegisterGameType("NEGLive")
 
 NEGLive.interest = 2
 NEGLive.patience = 3
+--- Copied from the definition at setup and toggleable from the board. Declared
+--- so a negotiation started before devils existed reads false rather than
+--- raising.
+NEGLive.devilInterest = false
+
 NEGLive.showInterest = false
 NEGLive.showPatience = false
 NEGLive.languageBonus = 0
@@ -117,30 +127,55 @@ local function AppendHistory(live, entry)
     live.history = history
 end
 
---- Heroes on the map, and only those. The engine's prompt gate tests
+--- Heroes on the map, and their beastheart companions, in roster order: heroes
+--- by name with each companion tucked in directly behind its owner.
+---
+--- On the map only. The engine's prompt gate tests
 --- `dmhub.GetTokenById(tokid) ~= nil` OUTSIDE its forceuserid disjunct
 --- (Draw Steel UI/DSRequestRollsDialog.lua), and that call is loaded-map only,
 --- so an off-map hero cannot be asked to roll by any means.
+---
+--- Companions are carried but are not a roster choice: they follow their hero.
 --- @return NEGParticipant[]
 function NEGLive.EligibleParticipants()
-    local placed = {}
-    for _, token in ipairs(dmhub.allTokens) do
-        if token ~= nil and token.valid then
-            placed[token.charid] = true
+    local roster = THCUtils.PartyRoster{ placedOnly = true, includeCompanions = true }
+
+    local owned = {}
+    local heroes = {}
+
+    for _, entry in ipairs(roster) do
+        local participant = NEGParticipant.CreateNew{
+            charid = entry.charid,
+            name = entry.name,
+            isCompanion = entry.isCompanion,
+            summonerId = entry.summonerId or "",
+            included = true,
+        }
+
+        if entry.isCompanion then
+            local owner = entry.summonerId or ""
+            owned[owner] = owned[owner] or {}
+            table.insert(owned[owner], participant)
+        else
+            heroes[#heroes + 1] = participant
         end
     end
 
+    table.sort(heroes, function(a, b)
+        return string.lower(a.name) < string.lower(b.name)
+    end)
+
+    --Spliced after the sort, so a companion cannot be pulled away from its hero
+    --by its own name. A companion whose owner did not make the roster is
+    --dropped with it: it is only ever here on that hero's account.
     local result = {}
-    for _, charid in ipairs(NEGRules.HeroRoster()) do
-        if placed[charid] then
-            local token = dmhub.GetCharacterById(charid)
-            result[#result + 1] = NEGParticipant.CreateNew{
-                charid = charid,
-                name = token ~= nil and token.name or "",
-                included = true,
-            }
+    for _, participant in ipairs(heroes) do
+        result[#result + 1] = participant
+        for _, companion in ipairs(owned[participant.charid] or {}) do
+            result[#result + 1] = companion
         end
     end
+
     return result
 end
 
@@ -155,11 +190,13 @@ function NEGLive.FromDefinition(def)
         revealedTraits = {},
         participants = NEGLive.EligibleParticipants(),
         interest = NEGConstants.Clamp(def:try_get("interest", NEGDefinition.interest),
-            NEGConstants.scaleMin, NEGConstants.scaleMax),
+            NEGConstants.scaleMin,
+            NEGRules.InterestMax(def:try_get("devilInterest", false))),
         patience = NEGConstants.Clamp(def:try_get("patience", NEGDefinition.patience),
             NEGConstants.scaleMin, NEGConstants.scaleMax),
         languageBonus = 0,
         languageSpeakers = {},
+        devilInterest = def:try_get("devilInterest", false),
         showInterest = def:try_get("showInterest", false),
         showPatience = def:try_get("showPatience", false),
         status = NEGConstants.statusSetup,
@@ -170,9 +207,23 @@ end
 --- The charids of the heroes actually taking part.
 --- @return string[]
 function NEGLive:IncludedCharids()
+    local included = {}
+    for _, p in ipairs(self:try_get("participants", {})) do
+        if p:try_get("included", true) and not p.isCompanion then
+            included[p.charid] = true
+        end
+    end
+
     local result = {}
     for _, p in ipairs(self:try_get("participants", {})) do
-        if p:try_get("included", true) then
+        --A companion is never ticked or unticked in its own right; it takes
+        --part exactly when the hero it belongs to does.
+        local taking = p:try_get("included", true)
+        if p.isCompanion then
+            taking = included[p.summonerId] == true
+        end
+
+        if taking then
             result[#result + 1] = p.charid
         end
     end
@@ -213,14 +264,27 @@ end
 --- @return boolean
 function NEGLive:AtTerminal()
     return self.interest <= NEGConstants.scaleMin
-        or self.interest >= NEGConstants.scaleMax
+        or self.interest >= self:InterestMax()
         or self.patience <= NEGConstants.scaleMin
+end
+
+--- The top of this negotiation's Interest track: 10 for a devil, 5 otherwise.
+--- @return number
+function NEGLive:InterestMax()
+    return NEGRules.InterestMax(self:try_get("devilInterest", false))
+end
+
+--- The 0..5 its offer ladder is read with, halved for a devil.
+--- @return number
+function NEGLive:ResultInterest()
+    return NEGRules.ResultInterest(self.interest,
+        self:try_get("devilInterest", false))
 end
 
 --- Why it is over, or an empty string while it is not.
 --- @return string
 function NEGLive:TerminalReason()
-    if self.interest >= NEGConstants.scaleMax then
+    if self.interest >= self:InterestMax() then
         return "Interest is full. This is their final offer."
     end
     if self.interest <= NEGConstants.scaleMin then
@@ -429,8 +493,12 @@ function NEGRun.SetScale(which, value)
         if live == nil then
             return
         end
-        live[which] = NEGConstants.Clamp(value,
-            NEGConstants.scaleMin, NEGConstants.scaleMax)
+        --Only Interest grows for a devil; patience keeps its own five.
+        local top = NEGConstants.scaleMax
+        if which == NEGConstants.scaleInterest then
+            top = live:InterestMax()
+        end
+        live[which] = NEGConstants.Clamp(value, NEGConstants.scaleMin, top)
 
         --Interest moved, so the shared offer is now the wrong one.
         if which == NEGConstants.scaleInterest then
@@ -628,6 +696,22 @@ function NEGRun.SetOpen(value)
     end)
 end
 
+--- Turn the devil's doubled Interest track on or off mid-run. The live value is
+--- converted with it - doubled on, halved off - so what the table had earned
+--- reads the same before and after.
+--- @param devil boolean
+function NEGRun.SetDevilInterest(devil)
+    NEGRun.Mutate("Set devil interest", function(data)
+        local live = data.live
+        if live == nil or live:try_get("devilInterest", false) == (devil == true) then
+            return
+        end
+        live.devilInterest = devil == true
+        live.interest = NEGRules.ConvertInterest(live.interest, devil == true)
+        live.offerShared = false
+    end)
+end
+
 --- @param hidden boolean
 function NEGRun.SetAssistHidden(hidden)
     NEGRun.Mutate("Show or hide the assist", function(data)
@@ -804,7 +888,7 @@ function NEGRun.HitPitfall(rowId)
     local res = live:try_get("resolution")
     local voided = res ~= nil and res.track == NEGConstants.trackArgument
     if voided and res.actionId ~= nil then
-        dmhub.CancelActionRequest(res.actionId)
+        THCRoll.Cancel(res.actionId)
     end
 
     local outcome = NEGRules.PitfallOutcome()
@@ -829,7 +913,7 @@ function NEGRun.HitPitfall(rowId)
         target.revealedTraits = revealed
 
         target.interest = NEGConstants.Clamp(target.interest + outcome.interest,
-            NEGConstants.scaleMin, NEGConstants.scaleMax)
+            NEGConstants.scaleMin, target:InterestMax())
         target.patience = NEGConstants.Clamp(target.patience + outcome.patience,
             NEGConstants.scaleMin, NEGConstants.scaleMax)
 
@@ -887,7 +971,7 @@ function NEGRun.End()
     local live = NEGRun.Active()
     local res = live ~= nil and live:try_get("resolution") or nil
     if res ~= nil and res.actionId ~= nil then
-        dmhub.CancelActionRequest(res.actionId)
+        THCRoll.Cancel(res.actionId)
     end
 
     --The board stays up: the table reads the final offer off it. Clear takes
@@ -1027,8 +1111,8 @@ end
 --- @param live NEGLive
 --- @return table
 function NEGRun.BuildReportPayload(live)
-    local interest = NEGConstants.Clamp(live.interest,
-        NEGConstants.scaleMin, NEGConstants.scaleMax)
+    --The ladder is read from the halved track, so a devil's 7 reports as a 3.
+    local interest = live:ResultInterest()
 
     return {
         name = live:Name(),
@@ -1101,97 +1185,23 @@ end
 -- ASKING A PLAYER TO ROLL
 --==============================================================================
 
---- The Director's answer for the request now out, or nil. Client-local by
---- nature: the resultTable belongs to their own summary dialog, and only their
---- client harvests. A reload drops it, which PumpRolls reads as the dialog
---- never having been there and falls back to harvesting on completion.
---- @type nil|{actionId: string, resultTable: table}
-local g_pending = nil
-
---- Turn a grant that crossed the wire into something the roll dialog will take.
---- Appending a bare modifier would raise: the dialog reads `.modifier` off each
---- entry, so this runs the same wrapper sequence the engine does. Nil when the
---- pipeline declines it, which is not an error.
---- @param creature any the roller, in hand on their own client
---- @param options table attribute and skills, as the pipeline wants them
---- @param modtype string "edge", "double_edge", "bane"
---- @param name string
---- @param description string
---- @return table|nil
-local function DescribeGrant(creature, options, modtype, name, description)
-    local m = CharacterModifier.new{
-        behavior = "power",
-        rollType = NEGConstants.modifierRollType,
-        modtype = modtype,
-        activationCondition = true,
-        guid = dmhub.GenerateGuid(),
-        name = name,
-        description = description,
-        keywords = {},
-    }
-
-    local entry = { mod = m }
-    local described = m:DescribeModifyPowerRoll(entry, creature,
-        NEGConstants.modifierRollType, options)
-    if described == nil then
-        return nil
-    end
-
-    described.hint = described.modifier:HintModifyPowerRolls(entry, creature,
-        NEGConstants.modifierRollType, options)
-    if described.hint == nil then
-        return nil
-    end
-
-    return described
-end
-
---- The player-facing roll. Two independent axes meet here: `rollType` picks
---- the dialog, while GetModifiers passes a type from the modifier pipeline's
---- own closed vocabulary. A private id on that second axis silently drops
---- every Tests-scoped modifier, Skilled included.
-RollCheck.RegisterCustom{
+--- The player-facing roll. Only the two grants are ours; THCRoll supplies the
+--- rest of the check.
+---
+--- Both cross the wire as flat scalars and become modifiers here, where the
+--- roller's creature is in hand. They stack: an assisted lead leaning on their
+--- Renown carries the assist's grant and the edge.
+THCRoll.RegisterCheck{
     id = NEGConstants.rollCheckId,
-    rollType = "power_roll_custom",
+    modifierRollType = NEGConstants.modifierRollType,
 
-    Describe = function(check, isplayer)
-        return check.info.explanation
-    end,
-
-    GetRoll = function(check, creature)
-        return "2d10 + " .. creature:AttributeMod(check.info.attrid)
-    end,
-
-    GetModifiers = function(check, creature)
-        local result = creature:GetModifiersForPowerRoll(
-            check:GetRoll(creature),
-            NEGConstants.modifierRollType,
-            { attribute = check.info.attrid, skills = check.skills })
-
-        --Skilled is offered rather than applied: the pipeline cannot know the
-        --skill was chosen for this test, so proficiency is confirmed here.
-        local skillsTable = GetTableCached("Skills")
-        for _, skillid in ipairs(check.skills or {}) do
-            local skill = skillsTable[skillid]
-            if skill ~= nil and creature:ProficientInSkill(skill) then
-                for _, entry in ipairs(result) do
-                    if entry.modifier.name == "Skilled" then
-                        entry.hint.result = true
-                    end
-                end
-            end
-        end
-
-        --Both grants cross the wire as flat scalars and become modifiers here,
-        --where the roller's creature is in hand. They stack: an assisted lead
-        --leaning on their Renown carries the assist's grant and the edge.
-        local options = { attribute = check.info.attrid, skills = check.skills }
-
+    DecorateModifiers = function(check, creature, options, result)
         local grant = check.info.assistGrant
         if grant ~= nil and grant ~= "" then
-            local described = DescribeGrant(creature, options, grant,
+            local described = THCRoll.DescribeGrant(creature, options, grant,
                 check.info.assistName or "Assisted",
-                check.info.assistDescription or "An ally assisted this test.")
+                check.info.assistDescription or "An ally assisted this test.",
+                NEGConstants.modifierRollType)
             if described ~= nil then
                 result[#result + 1] = described
             end
@@ -1200,39 +1210,14 @@ RollCheck.RegisterCustom{
         --Leaning on Renown is always an edge, so the wire carries only that it
         --is on.
         if check.info.renownEdge == true then
-            local described = DescribeGrant(creature, options, "edge",
+            local described = THCRoll.DescribeGrant(creature, options, "edge",
                 "Renown",
-                "You leaned on your Renown to make this argument, for an edge.")
+                "You leaned on your Renown to make this argument, for an edge.",
+                NEGConstants.modifierRollType)
             if described ~= nil then
                 result[#result + 1] = described
             end
         end
-
-        for _, entry in pairs(check:try_get("modifiers", {})) do
-            result[#result + 1] = entry
-        end
-
-        return result
-    end,
-
-    ShowDialog = function(check, dialogOptions)
-        --A negotiation roll is read, not admired: the tier table has to be
-        --legible over whatever the map is showing. The frame's blur is what
-        --makes it see-through, so opacity alone would not do it.
-        dialogOptions.solidDialog = true
-
-        local tiers = check:try_get("options", {}).tiers
-
-        if tiers ~= nil then
-            dialogOptions.rollProperties = RollPropertiesPowerTable.new{
-                tiers = DeepCopy(tiers),
-            }
-            dialogOptions.PopulateCustom =
-                ActivatedAbilityPowerRollBehavior.GetPowerTablePopulateCustom(
-                    dialogOptions.rollProperties, dialogOptions.creature)
-        end
-
-        return GameHud.instance.rollDialog.data.ShowDialog(dialogOptions)
     end,
 }
 
@@ -1335,26 +1320,13 @@ local function SendRequest(live, slot, track, grant, grantFrom)
         },
     }
 
-    local actionId = dmhub.SendActionRequest(RollRequest.new{
-        title = title,
-        checks = { check },
-        tokens = { [entry.charid] = {} },
-    })
-
     --The Director gets the game's own roll summary over the board, which is
-    --what brings Re-roll and Take Roll to a negotiation test. Its Proceed is
-    --what accepts the roll, so the resultTable is kept rather than discarded:
-    --PumpRolls waits on it instead of on the roll completing.
-    local hud = actionId ~= nil and GameHud.instance or nil
-    if hud then
-        local resultTable = {}
-        hud:ShowRollSummaryDialog(actionId, resultTable)
-        g_pending = { actionId = actionId, resultTable = resultTable }
-    else
-        g_pending = nil
-    end
-
-    return actionId
+    --what brings Re-roll and Take Roll to a negotiation test.
+    return THCRoll.Send{
+        title = title,
+        charid = entry.charid,
+        check = check,
+    }
 end
 
 --- Whether this client may move this hero. The Director may move anyone; a
@@ -1480,14 +1452,9 @@ end
 function NEGRun.CancelRoll()
     local live = NEGRun.Active()
     local res = live ~= nil and live:try_get("resolution") or nil
-
     --Dropped before the request goes, so the dialog's dying `result = false`
     --is never read back against a request that no longer exists.
-    g_pending = nil
-
-    if res ~= nil and res.actionId ~= nil then
-        dmhub.CancelActionRequest(res.actionId)
-    end
+    THCRoll.Cancel(res ~= nil and res.actionId or nil)
 
     NEGRun.Mutate("Cancel negotiation roll", function(data)
         if data.live ~= nil then
@@ -1522,82 +1489,29 @@ function NEGRun.PumpRolls()
         end)
     end
 
-    --Held before the request is read. Proceed cancels the request on its way
-    --out, so by the time this pump next runs the request is ALREADY GONE - and
-    --a missing request must not be read as an abandoned roll while an answer
-    --is waiting. That ordering is the whole reason this sits up here.
-    local answer = nil
-    if g_pending ~= nil and g_pending.actionId == res.actionId then
-        answer = g_pending.resultTable
-    end
-
-    local req = dmhub.GetPlayerActionRequest(res.actionId)
-    local info = req ~= nil and req.info.tokens[res.actionFor] or nil
-    local status = info ~= nil and info.status or nil
+    local status, rollInfo = THCRoll.Harvest(res.actionId, res.actionFor)
 
     --A player who dismissed their own roll takes the request down with them,
     --which closes the summary dialog too.
-    if status == "cancel" then
+    if status == "cancelled" then
         NEGRun.CancelRoll()
         return
     end
 
-    --Where the numbers come from, and whether it is time to take them. With a
-    --summary dialog up, the Director's Proceed is what accepts the roll: a
-    --completed roll sits there unrecorded so Re-roll and Take Roll still have
-    --a live request to act on, and so a roll about to be thrown away has not
-    --already moved the scales.
-    local tokenInfo = nil
-
-    if answer ~= nil then
-        --Still on the Director's desk.
-        if answer.result == nil then
-            return
-        end
-
-        g_pending = nil
-
-        --Cancelled while incomplete, or the dialog was dismissed. It dropped
-        --the request on its way out, so there is nothing left to cancel.
-        if answer.result ~= true or answer.action == nil then
-            Abandon()
-            return
-        end
-
-        --Snapshotted before the dialog cancelled the request, which is what
-        --makes this safe to read now.
-        tokenInfo = answer.action.info.tokens[res.actionFor]
-    else
-        --No dialog: a reload took it, or there was no hud to show one. Harvest
-        --on completion, as this pump always did, and treat a request cleared
-        --out from under us as never having been asked.
-        if req == nil then
-            Abandon()
-            return
-        end
-
-        if status ~= "complete" then
-            return
-        end
-
-        tokenInfo = info
-        dmhub.CancelActionRequest(res.actionId)
+    --With a summary dialog up, the Director's Proceed is what accepts the
+    --roll: a completed roll sits unrecorded so Re-roll and Take Roll still
+    --have a live request to act on, and so a roll about to be thrown away has
+    --not already moved the scales.
+    if status == "waiting" then
+        return
     end
 
-    if tokenInfo == nil or tokenInfo.status ~= "complete" then
+    if status ~= "complete" then
         Abandon()
         return
     end
 
-    --Tier comes from the numbers the request carries, not from the total
-    --alone: two edges bump the tier without moving it.
-    local rollInfo = {
-        total = tokenInfo.result,
-        naturalRoll = tokenInfo.naturalRoll,
-        boons = tokenInfo.boons,
-        banes = tokenInfo.banes,
-    }
-    local tier = RollUtils.DiceResultToTier(rollInfo)
+    local tier = rollInfo.tier
 
     local wasAssist = res.slot == NEGConstants.slotAssist
     local track = res.track
@@ -1653,7 +1567,7 @@ function NEGRun.PumpRolls()
             if outcome.interest ~= 0 then
                 target.interest = NEGConstants.Clamp(
                     target.interest + outcome.interest,
-                    NEGConstants.scaleMin, NEGConstants.scaleMax)
+                    NEGConstants.scaleMin, target:InterestMax())
 
                 --Interest moved, so the offer moved with it.
                 target.offerShared = false
@@ -1717,7 +1631,7 @@ function NEGRun.Clear()
     local live = NEGRun.Active()
     local res = live ~= nil and live:try_get("resolution") or nil
     if res ~= nil and res.actionId ~= nil then
-        dmhub.CancelActionRequest(res.actionId)
+        THCRoll.Cancel(res.actionId)
     end
 
     NEGRun.Mutate("Clear negotiation", function(data)

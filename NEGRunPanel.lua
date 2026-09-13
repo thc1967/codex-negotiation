@@ -325,9 +325,13 @@ function NEGRunPanel.CreateSetup()
                     "Opens at Interest %d, Patience %d.", live.interest, patience)
             end
 
+            --Companions are left out: they follow the hero they belong to, so
+            --there is nothing here for the Director to decide.
             local rows = {}
             for i, p in ipairs(live:try_get("participants", {})) do
-                rows[#rows + 1] = ParticipantRow(p, i)
+                if not p.isCompanion then
+                    rows[#rows + 1] = ParticipantRow(p, i)
+                end
             end
 
             if #rows == 0 then
@@ -793,7 +797,7 @@ local function TrackPanel(live, args)
     end
 
     if curtainText ~= nil then
-        local curtain = NEGWidgets.Overlay(curtainText, "sizeL", 1, 0)
+        local curtain = THCWidgets.Overlay(curtainText, "sizeL", 1, 0)
         curtain:SetClass("collapsed", false)
         children[#children + 1] = curtain
     end
@@ -1141,14 +1145,20 @@ function NEGRunPanel.Create(args)
         }
     end
 
-    local idleNotice = NEGWidgets.Notice("No negotiation is running.")
+    local idleNotice = THCWidgets.Notice("No negotiation is running.")
 
     --- @param live NEGLive
     --- @return Panel[]
     local function BuildScales(live)
         local interest = live.interest
         local patience = live.patience
-        local interestCaption, interestClass = NEGWidgets.InterestCaption(interest)
+        local devil = live:try_get("devilInterest", false)
+        local interestMax = live:InterestMax()
+
+        --Both the caption and the tone read the halved track: what a devil's
+        --Interest currently buys, not how many bubbles are lit.
+        local resultInterest = live:ResultInterest()
+        local interestCaption, interestClass = NEGWidgets.InterestCaption(resultInterest)
 
         if director then
             return {
@@ -1156,6 +1166,8 @@ function NEGRunPanel.Create(args)
                     which = NEGConstants.scaleInterest,
                     label = "Interest",
                     value = interest,
+                    pipMax = interestMax,
+                    toneValue = resultInterest,
                     interactive = true,
                     caption = interestCaption,
                     captionClass = interestClass,
@@ -1166,6 +1178,21 @@ function NEGRunPanel.Create(args)
                         shown = live:try_get("showInterest", false),
                         change = function(shown)
                             NEGRun.SetRevealed(NEGConstants.scaleInterest, shown)
+                        end,
+                    },
+                    trailing = gui.Panel{
+                        classes = { cond(devil, "bgDanger", "bgFgMuted") },
+                        width = 14,
+                        height = 14,
+                        halign = "left",
+                        valign = "center",
+                        lmargin = 4,
+                        bgimage = NEGConstants.iconDevil,
+                        hover = gui.Tooltip(cond(devil,
+                            "Devil's bargain: Interest runs to 10 and is halved to name the offer. Click for a normal track.",
+                            "Normal Interest. Click for a devil's doubled track.")),
+                        press = function()
+                            NEGRun.SetDevilInterest(not devil)
                         end,
                     },
                 },
@@ -1198,6 +1225,8 @@ function NEGRunPanel.Create(args)
                 which = NEGConstants.scaleInterest,
                 label = "Interest",
                 value = interest,
+                pipMax = interestMax,
+                toneValue = resultInterest,
                 interactive = false,
                 unknown = not interestOpen,
                 caption = cond(interestOpen, interestCaption, ""),
@@ -1291,8 +1320,8 @@ function NEGRunPanel.Create(args)
             end
 
             if finished then
-                local value = NEGConstants.Clamp(live.interest,
-                    NEGConstants.scaleMin, NEGConstants.scaleMax)
+                --Halved for a devil: the ladder is always read 0..5.
+                local value = live:ResultInterest()
                 --Only the tone is wanted here. InterestCaption's text is
                 --"N  <offer name>", so its remainder past the number IS the
                 --offer name, and pairing the two said it twice.

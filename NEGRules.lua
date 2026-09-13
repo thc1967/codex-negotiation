@@ -189,6 +189,44 @@ NEGRules.offers = {
     },
 }
 
+--- How far this negotiation's Interest track runs. A devil's is twice as long;
+--- everything else about the scale is unchanged.
+--- @param devil nil|boolean
+--- @return number
+function NEGRules.InterestMax(devil)
+    return cond(devil == true, NEGConstants.scaleMaxDevil, NEGConstants.scaleMax)
+end
+
+--- The 0..5 the offer ladder is read with. A devil's track is halved, rounding
+--- down, so 7 out of 10 buys what 3 out of 5 buys.
+--- @param interest number a raw track value
+--- @param devil nil|boolean
+--- @return number
+function NEGRules.ResultInterest(interest, devil)
+    local raw = NEGConstants.Clamp(interest,
+        NEGConstants.scaleMin, NEGRules.InterestMax(devil))
+    if devil ~= true then
+        return raw
+    end
+    return math.floor(raw / 2)
+end
+
+--- Convert a track value as the devil switch flips: doubled turning on, halved
+--- turning off, so what the table had earned survives the change.
+--- @param interest number
+--- @param devil boolean the state being turned ON
+--- @return number
+function NEGRules.ConvertInterest(interest, devil)
+    local value = interest or 0
+    if devil == true then
+        value = value * 2
+    else
+        value = math.floor(value / 2)
+    end
+    return NEGConstants.Clamp(value,
+        NEGConstants.scaleMin, NEGRules.InterestMax(devil))
+end
+
 --- @param interest number
 --- @return string
 function NEGRules.OfferName(interest)
@@ -424,8 +462,20 @@ function NEGRules.BuildEnding(live)
         went[#went + 1] = "Nothing was rolled."
     end
 
-    went[#went + 1] = string.format("Interest %d to %d, patience %d to %d",
-        openInterest, live.interest, openPatience, live.patience)
+    --A devil's line reports the track it was actually played on and says so;
+    --the offer the Director reads out comes from the halved value.
+    local devil = live:try_get("devilInterest", false)
+    if devil then
+        went[#went + 1] = string.format(
+            "Interest %d to %d of %d, a devil's bargain - halved to %d",
+            openInterest, live.interest, NEGRules.InterestMax(true),
+            live:ResultInterest())
+        went[#went + 1] = string.format("Patience %d to %d",
+            openPatience, live.patience)
+    else
+        went[#went + 1] = string.format("Interest %d to %d, patience %d to %d",
+            openInterest, live.interest, openPatience, live.patience)
+    end
 
     if bestTier ~= nil then
         local who = ""
@@ -488,7 +538,7 @@ function NEGRules.BuildEnding(live)
     Section("Who Spoke", spoke)
 
     return {
-        victories = NEGRules.SuggestedVictories(live.interest),
+        victories = NEGRules.SuggestedVictories(live:ResultInterest()),
         sections = sections,
     }
 end
@@ -566,40 +616,19 @@ end
 --- is what a slot opens on; the rest are offered on the same chapter's
 --- "another applicable test, as the Director determines".
 --- @return {id: string, text: string}[]
-function NEGRules.CharacteristicOptions()
-    local options = {}
-    for _, id in ipairs(creature.attributeIds) do
-        local info = creature.attributesInfo[id]
-        options[#options + 1] = {
-            id = id,
-            text = info ~= nil and info.description or id,
-        }
-    end
-    return options
-end
+function NEGRules.CharacteristicOptions() return THCUtils.CharacteristicOptions() end
 
 --- @param id string
 --- @return string
-function NEGRules.CharacteristicName(id)
-    local info = creature.attributesInfo[id]
-    return info ~= nil and info.description or tostring(id)
-end
+function NEGRules.CharacteristicName(id) return THCUtils.CharacteristicName(id) end
 
---- This creature's modifier for a characteristic, or nil when it has none.
 --- @param charid string
 --- @param attrId string
 --- @return number|nil
 function NEGRules.CharacteristicModifier(charid, attrId)
-    local token = dmhub.GetCharacterById(charid)
-    if token == nil or token.properties == nil then
-        return nil
-    end
-    local modifier = nil
-    pcall(function()
-        modifier = token.properties:GetAttribute(attrId):Modifier()
-    end)
-    return modifier
+    return THCUtils.CharacteristicModifier(charid, attrId)
 end
+
 
 --- This hero's Renown, the score an NPC's Impression is read against. Nil when
 --- the character cannot be read at all; 0 is a real Renown, since that is where
@@ -620,58 +649,17 @@ end
 
 --- @param modifier number|nil
 --- @return string
-function NEGRules.SignedModifier(modifier)
-    if modifier == nil then
-        return ""
-    end
-    return string.format("%s%d", modifier >= 0 and "+" or "", modifier)
-end
+function NEGRules.SignedModifier(modifier) return THCUtils.SignedModifier(modifier) end
 
 --- @param id string
 --- @return string
-function NEGRules.SkillName(id)
-    local skill = Skill.SkillsById ~= nil and Skill.SkillsById[id] or nil
-    if skill ~= nil then
-        return skill.name
-    end
-    local skillsTable = dmhub.GetTable(Skill.tableName) or {}
-    local entry = skillsTable[id]
-    return entry ~= nil and entry.name or tostring(id)
-end
+function NEGRules.SkillName(id) return THCUtils.SkillName(id) end
 
 --- The skills this hero actually has, sorted by name, with an opening entry
 --- for making the case on the characteristic alone.
 --- @param charid string
 --- @return {id: string, text: string}[]
-function NEGRules.SkillOptionsFor(charid)
-    local options = { { id = "", text = "(no skill)" } }
-
-    local token = dmhub.GetCharacterById(charid)
-    if token == nil or token.properties == nil then
-        return options
-    end
-
-    local owned = {}
-    for _, skill in ipairs(Skill.SkillsInfo) do
-        local has = false
-        pcall(function()
-            has = token.properties:ProficientInSkill(skill)
-        end)
-        if has then
-            owned[#owned + 1] = { id = skill.id, text = skill.name }
-        end
-    end
-
-    table.sort(owned, function(a, b)
-        return string.lower(a.text) < string.lower(b.text)
-    end)
-
-    for _, entry in ipairs(owned) do
-        options[#options + 1] = entry
-    end
-
-    return options
-end
+function NEGRules.SkillOptionsFor(charid) return THCUtils.SkillOptionsFor(charid, true) end
 
 --- Every language an NPC could natively speak: the game's list, less whatever
 --- the heroes all know already. A rule granting "all" would otherwise empty
@@ -706,60 +694,15 @@ function NEGRules.LanguageName(langid)
     return entry ~= nil and entry.name or ""
 end
 
---- Every player-controlled hero in the game, on the map or off it. The default
---- party seeds explicitly so a hidden party still contributes; characters in
---- other parties only count when they have a named owner, since
---- playerControlled is also true for party-shared tokens.
+--- Every player-controlled hero in the game, on the map or off it. The walk
+--- itself is THCCore's; heroes only, because followers are characters in their
+--- own right and heroes are who negotiate.
 --- @return string[] charids
 function NEGRules.HeroRoster()
     local result = {}
-    local seen = {}
-    local partyId = GetDefaultPartyID()
-
-    local function Consider(charid, inDefaultParty)
-        if charid == nil or seen[charid] then
-            return
-        end
-
-        local token = dmhub.GetCharacterById(charid)
-        if token == nil or token.properties == nil then
-            return
-        end
-
-        if not inDefaultParty and token.playerControlledNotShared ~= true then
-            return
-        end
-
-        --Followers are characters in their own right and would otherwise turn
-        --up here. Heroes are who negotiate.
-        local isHero = false
-        pcall(function()
-            isHero = token.properties:IsHero()
-        end)
-        if not isHero then
-            return
-        end
-
-        seen[charid] = true
-        result[#result + 1] = charid
+    for _, entry in ipairs(THCUtils.PartyRoster{ heroesOnly = true }) do
+        result[#result + 1] = entry.charid
     end
-
-    for _, charid in ipairs(dmhub.GetCharacterIdsInParty(partyId) or {}) do
-        Consider(charid, true)
-    end
-
-    for pid, _ in unhidden_pairs(dmhub.GetTable(Party.tableName) or {}) do
-        for _, charid in ipairs(dmhub.GetCharacterIdsInParty(pid) or {}) do
-            Consider(charid, pid == partyId)
-        end
-    end
-
-    for _, token in ipairs(dmhub.allTokens) do
-        if token ~= nil and token.valid then
-            Consider(token.charid, token.partyId == partyId)
-        end
-    end
-
     return result
 end
 

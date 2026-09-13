@@ -60,6 +60,10 @@ NEGDefinition.impression = NEGConstants.impressionDefault
 NEGDefinition.interest = 2
 NEGDefinition.patience = 3
 
+--- Devils bargain on a doubled Interest track, halved at the close to name the
+--- offer. Authored here and copied onto the Run, where it stays toggleable.
+NEGDefinition.devilInterest = false
+
 --- The table sees nothing by default. Revealing a scale is a deliberate act.
 NEGDefinition.showInterest = false
 NEGDefinition.showPatience = false
@@ -141,235 +145,77 @@ end
 
 mod:RegisterDocumentForCheckpointBackups(NEGConstants.libraryDoc)
 
+--- The filing cabinet itself lives in THCCore; what is negotiation-specific is
+--- the noun on an undo entry and the attitude a new negotiation opens on.
+local g_library = THCLibrary.CreateNew{
+    mod = mod,
+    docId = NEGConstants.libraryDoc,
+    noun = "negotiation",
+    defaultName = "New Negotiation",
+    CreateDefinition = function(name)
+        local attitude = NEGRules.AttitudeById(NEGDefinition.attitudeId)
+        return NEGDefinition.CreateNew{
+            name = name,
+            interest = attitude ~= nil and attitude.interest or NEGDefinition.interest,
+            patience = attitude ~= nil and attitude.patience or NEGDefinition.patience,
+        }
+    end,
+}
+
 --- @return LuaCodeModDocumentSnapshot
-function NEGDefinition.Doc()
-    return mod:GetDocumentSnapshot(NEGConstants.libraryDoc)
-end
+function NEGDefinition.Doc() return g_library:Doc() end
 
 --- @return string monitorGame path for the library
-function NEGDefinition.DocPath()
-    return mod:GetDocumentPath(NEGConstants.libraryDoc)
-end
+function NEGDefinition.DocPath() return g_library:DocPath() end
 
 --- Mutate the library inside one document change.
 --- @param description string
 --- @param fn fun(definitions: table<string, NEGDefinition>)
-function NEGDefinition.Mutate(description, fn)
-    local doc = NEGDefinition.Doc()
-    doc:BeginChange()
-    if doc.data.definitions == nil then
-        doc.data.definitions = {}
-    end
-    fn(doc.data.definitions)
-    doc:CompleteChange(description)
-end
-
---- @return table<string, NEGDefinition>
-local function Definitions()
-    local doc = NEGDefinition.Doc()
-    if doc == nil or doc.data == nil then
-        return {}
-    end
-    return doc.data.definitions or {}
-end
+function NEGDefinition.Mutate(description, fn) g_library:Mutate(description, fn) end
 
 --- @return NEGDefinition[] sorted by name, then id
-function NEGDefinition.GetAll()
-    local result = {}
-    for id, def in pairs(Definitions()) do
-        def.id = id
-        result[#result + 1] = def
-    end
-    table.sort(result, function(a, b)
-        local an, bn = string.lower(a.name or ""), string.lower(b.name or "")
-        if an == bn then
-            return a:GetID() < b:GetID()
-        end
-        return an < bn
-    end)
-    return result
-end
+function NEGDefinition.GetAll() return g_library:GetAll() end
 
 --- @param id string
 --- @return NEGDefinition|nil
-function NEGDefinition.GetByID(id)
-    if id == nil or id == "" then
-        return nil
-    end
-    return Definitions()[id]
-end
+function NEGDefinition.GetByID(id) return g_library:GetByID(id) end
 
---- Folders exist only in the library document, so an empty one can still be
---- named and kept.
 --- @return {id: string, name: string}[] sorted by name
-function NEGDefinition.GetFolders()
-    local doc = NEGDefinition.Doc()
-    local folders = doc ~= nil and doc.data ~= nil and doc.data.folders or {}
-
-    local result = {}
-    for id, folder in pairs(folders) do
-        result[#result + 1] = { id = id, name = folder.name or "" }
-    end
-    table.sort(result, function(a, b)
-        local an, bn = string.lower(a.name), string.lower(b.name)
-        if an == bn then
-            return a.id < b.id
-        end
-        return an < bn
-    end)
-    return result
-end
-
---- @param description string
---- @param fn fun(folders: table)
-local function MutateFolders(description, fn)
-    local doc = NEGDefinition.Doc()
-    doc:BeginChange()
-    if doc.data.folders == nil then
-        doc.data.folders = {}
-    end
-    fn(doc.data.folders)
-    doc:CompleteChange(description)
-end
+function NEGDefinition.GetFolders() return g_library:GetFolders() end
 
 --- @return string id of the new folder
-function NEGDefinition.CreateFolder()
-    local id = dmhub.GenerateGuid()
-    MutateFolders("New negotiation folder", function(folders)
-        folders[id] = { id = id, name = "New Folder" }
-    end)
-    return id
-end
+function NEGDefinition.CreateFolder() return g_library:CreateFolder() end
 
 --- @param id string
 --- @param name string
-function NEGDefinition.RenameFolder(id, name)
-    MutateFolders("Rename negotiation folder", function(folders)
-        local folder = folders[id]
-        if folder ~= nil and folder.name ~= name then
-            folder.name = name
-        end
-    end)
-end
+function NEGDefinition.RenameFolder(id, name) g_library:RenameFolder(id, name) end
 
---- Negotiations in a folder are the reason to keep it, so an occupied folder
---- stays. Emptying it is the Director's decision, not a side effect.
 --- @param id string
 --- @return boolean whether it went
-function NEGDefinition.DeleteFolder(id)
-    for _, def in ipairs(NEGDefinition.GetAll()) do
-        if def:try_get("folderId", "") == id then
-            return false
-        end
-    end
-
-    MutateFolders("Delete negotiation folder", function(folders)
-        folders[id] = nil
-    end)
-    return true
-end
+function NEGDefinition.DeleteFolder(id) return g_library:DeleteFolder(id) end
 
 --- @param defid string
 --- @param folderId string empty for the root
-function NEGDefinition.SetFolder(defid, folderId)
-    NEGDefinition.Mutate("Move negotiation", function(defs)
-        local def = defs[defid]
-        if def ~= nil then
-            def.folderId = folderId or ""
-        end
-    end)
-end
-
---- The readable half of a slug: lowercased, every run of non-alphanumerics
---- collapsed to one dash, ends trimmed.
---- @param name nil|string
---- @return string
-local function Slugify(name)
-    local s = string.lower(trim(name or ""))
-    s = string.gsub(s, "[^%w]+", "-")
-    s = string.gsub(s, "^%-+", "")
-    s = string.gsub(s, "%-+$", "")
-    if s == "" then
-        s = "negotiation"
-    end
-    return s
-end
-
---- This name's slug, disambiguated against every OTHER negotiation's. Takes
---- the library table rather than reading it back, because it runs inside a
---- mutation - and because the -2 suffix has to be settled against one view of
---- the library. Derived at read time it would ride on pairs() order, and two
---- negotiations sharing a name could swap suffixes between calls.
---- @param defs table the whole library, mid-mutation
---- @param id string the negotiation being named
---- @param name nil|string
---- @return string
-local function UniqueSlug(defs, id, name)
-    local base = Slugify(name)
-
-    local taken = {}
-    for otherId, def in pairs(defs) do
-        if otherId ~= id and type(def) == "table" then
-            local slug = def.slug
-            if type(slug) == "string" and slug ~= "" then
-                taken[slug] = true
-            end
-        end
-    end
-
-    if not taken[base] then
-        return base
-    end
-
-    local counter = 1
-    while true do
-        counter = counter + 1
-        local candidate = string.format("%s-%d", base, counter)
-        if not taken[candidate] then
-            return candidate
-        end
-    end
-end
+function NEGDefinition.SetFolder(defid, folderId) g_library:SetFolder(defid, folderId) end
 
 --- @param name nil|string
 --- @return string id
-function NEGDefinition.CreateInLibrary(name)
-    local attitude = NEGRules.AttitudeById(NEGDefinition.attitudeId)
-    local def = NEGDefinition.CreateNew{
-        name = name or "New Negotiation",
-        interest = attitude ~= nil and attitude.interest or NEGDefinition.interest,
-        patience = attitude ~= nil and attitude.patience or NEGDefinition.patience,
-    }
-    NEGDefinition.Mutate("Create negotiation", function(defs)
-        defs[def:GetID()] = def
-        def.slug = UniqueSlug(defs, def:GetID(), def.name)
-    end)
-    return def:GetID()
-end
+function NEGDefinition.CreateInLibrary(name) return g_library:CreateInLibrary(name) end
 
 --- @param id string
 --- @return string|nil id of the copy
-function NEGDefinition.Duplicate(id)
-    local source = NEGDefinition.GetByID(id)
-    if source == nil then
-        return nil
-    end
-    local copy = DeepCopy(source)
-    copy.id = dmhub.GenerateGuid()
-    copy.name = string.format("%s (copy)", source.name or "Negotiation")
-    NEGDefinition.Mutate("Duplicate negotiation", function(defs)
-        defs[copy.id] = copy
-        copy.slug = UniqueSlug(defs, copy.id, copy.name)
-    end)
-    return copy.id
-end
+function NEGDefinition.Duplicate(id) return g_library:Duplicate(id) end
 
 --- @param id string
-function NEGDefinition.Delete(id)
-    NEGDefinition.Mutate("Delete negotiation", function(defs)
-        defs[id] = nil
-    end)
-end
+function NEGDefinition.Delete(id) g_library:Delete(id) end
+
+--- Exposed because renaming and importing both re-derive a slug from inside
+--- their own mutation, where the library table is already in hand.
+--- @param defs table the whole library, mid-mutation
+--- @param id string
+--- @param name nil|string
+--- @return string
+function NEGDefinition.UniqueSlug(defs, id, name) return g_library:UniqueSlug(defs, id, name) end
 
 --- Write one plain field. Scales and impression arrive already clamped by
 --- their controls; this does not second-guess them.
@@ -386,7 +232,7 @@ function NEGDefinition.SetField(id, key, value)
             --Anything already holding the old slug stops resolving; that is
             --the chosen behaviour, not an oversight.
             if key == "name" then
-                def.slug = UniqueSlug(defs, id, value)
+                def.slug = NEGDefinition.UniqueSlug(defs, id, value)
             end
         end
     end)
@@ -395,46 +241,34 @@ end
 --- The negotiation carrying this slug, or nil.
 --- @param slug string
 --- @return NEGDefinition|nil
-function NEGDefinition.GetBySlug(slug)
-    if type(slug) ~= "string" or slug == "" then
-        return nil
-    end
-    for _, def in ipairs(NEGDefinition.GetAll()) do
-        if def.slug == slug then
-            return def
-        end
-    end
-    return nil
-end
+function NEGDefinition.GetBySlug(slug) return g_library:GetBySlug(slug) end
 
---- This negotiation's slug, stamping one first if it predates the field. Saves
---- every caller having to cope with an empty string.
+--- This negotiation's slug, stamping one first if it predates the field.
 --- @param id string
 --- @return string
-function NEGDefinition.EnsureSlug(id)
-    local def = NEGDefinition.GetByID(id)
-    if def == nil then
-        return ""
-    end
-    if def.slug ~= "" then
-        return def.slug
-    end
-
-    NEGDefinition.Mutate("Assign negotiation slug", function(defs)
-        local target = defs[id]
-        if target ~= nil and target.slug == "" then
-            target.slug = UniqueSlug(defs, id, target.name)
-        end
-    end)
-
-    local stamped = NEGDefinition.GetByID(id)
-    return stamped ~= nil and stamped.slug or ""
-end
+function NEGDefinition.EnsureSlug(id) return g_library:EnsureSlug(id) end
 
 --- Picking an attitude is picking its opening numbers. Both stay editable
 --- afterwards - the rules leave the Director free to adjust either.
 --- @param id string
 --- @param attitudeId string
+--- Turn the devil's doubled Interest track on or off. The authored opening
+--- Interest converts with it - doubled on, halved off - so the offer it opens
+--- against reads the same either way.
+--- @param id string
+--- @param devil boolean
+function NEGDefinition.SetDevilInterest(id, devil)
+    NEGDefinition.Mutate("Set devil interest", function(defs)
+        local def = defs[id]
+        if def == nil or def:try_get("devilInterest", false) == (devil == true) then
+            return
+        end
+        def.devilInterest = devil == true
+        def.interest = NEGRules.ConvertInterest(
+            def:try_get("interest", NEGDefinition.interest), devil == true)
+    end)
+end
+
 function NEGDefinition.ApplyAttitude(id, attitudeId)
     local attitude = NEGRules.AttitudeById(attitudeId)
     if attitude == nil then
@@ -447,7 +281,12 @@ function NEGDefinition.ApplyAttitude(id, attitudeId)
             return
         end
         def.attitudeId = attitudeId
-        def.interest = attitude.interest
+        --The attitudes are written for a five-point track, so a devil's
+        --opening doubles with everything else: Neutral opens 2, or 4.
+        def.interest = NEGConstants.Clamp(
+            attitude.interest * cond(def:try_get("devilInterest", false), 2, 1),
+            NEGConstants.scaleMin,
+            NEGRules.InterestMax(def:try_get("devilInterest", false)))
         def.patience = attitude.patience
     end)
 end
@@ -718,13 +557,18 @@ function NEGDefinition.ImportFromJson(text)
             tostring(data.attitude), attitude.text)
     end
 
+    local devilInterest = data.devilInterest == true
+
     local def = NEGDefinition.CreateNew{
         name = name,
         npcName = cond(type(data.npc) == "string", data.npc, ""),
         summary = cond(type(data.summary) == "string", data.summary, ""),
         attitudeId = attitudeId,
+        devilInterest = devilInterest,
+        --The opening Interest is not capped short of the ends: a devil's track
+        --runs to 10, and the Director may open anywhere on it.
         interest = NEGConstants.Clamp(data.interest or attitude.interest,
-            NEGConstants.startInterestMin, NEGConstants.startInterestMax),
+            NEGConstants.scaleMin, NEGRules.InterestMax(devilInterest)),
         patience = NEGConstants.Clamp(data.patience or attitude.patience,
             NEGConstants.startPatienceMin, NEGConstants.startPatienceMax),
         impression = NEGConstants.Clamp(data.impression or NEGConstants.impressionDefault,
@@ -781,7 +625,7 @@ function NEGDefinition.ImportFromJson(text)
 
     NEGDefinition.Mutate("Import negotiation", function(defs)
         defs[def:GetID()] = def
-        def.slug = UniqueSlug(defs, def:GetID(), def.name)
+        def.slug = NEGDefinition.UniqueSlug(defs, def:GetID(), def.name)
     end)
 
     return { ok = true, defid = def:GetID(), name = name, messages = messages }
