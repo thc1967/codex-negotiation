@@ -228,133 +228,30 @@ end
 --- @return Panel
 function NEGEndingPanel.CreateCelebration(payload)
     local ending = payload.ending or {}
-    local victories = ending.victories or 0
 
-    local children = {
-        gui.Label{
-            classes = { "modalTitle", "sizeXxl" },
-            interactable = false,
-            width = "100%",
-            height = "auto",
-            halign = "center",
-            valign = "top",
-            textAlignment = "center",
-            text = cond(payload.npcName ~= nil and payload.npcName ~= "",
-                payload.npcName, payload.name or "Negotiation"),
-        },
+    return THCWidgets.Celebration{
+        title = cond(payload.npcName ~= nil and payload.npcName ~= "",
+            payload.npcName, payload.name or "Negotiation"),
+        subtitle = payload.result or "",
+        detail = payload.detail or "",
+        victories = ending.victories or 0,
+        icon = NEGConstants.iconVictory,
+        recap = payload.recap,
 
-        gui.Label{
-            classes = { "sizeXl", "fgMuted" },
-            interactable = false,
-            width = "100%",
-            height = "auto",
-            halign = "center",
-            valign = "top",
-            textAlignment = "center",
-            text = payload.result or "",
-        },
-    }
-
-    local detail = payload.detail or ""
-    if detail ~= "" then
-        children[#children + 1] = gui.Label{
-            classes = { "sizeS", "fgMuted" },
-            interactable = false,
-            width = "80%",
-            height = "auto",
-            halign = "center",
-            valign = "top",
-            tmargin = 4,
-            markdown = true,
-            textAlignment = "center",
-            textWrap = true,
-            text = detail,
-        }
-    end
-
-    children[#children + 1] = gui.Panel{
-        interactable = false,
-        width = "auto",
-        height = "auto",
-        flow = "horizontal",
-        halign = "center",
-        valign = "top",
-        vmargin = 12,
-
-        gui.Panel{
-            classes = { "image" },
-            interactable = false,
-            width = 48,
-            height = 48,
-            halign = "left",
-            valign = "center",
-            rmargin = 10,
-            bgimage = NEGConstants.iconVictory,
-        },
-
-        gui.Label{
-            classes = { "sizeXxl" },
-            interactable = false,
-            width = "auto",
-            height = "auto",
-            halign = "left",
-            valign = "center",
-            text = string.format("%d %s", victories,
-                cond(victories == 1, "Victory", "Victories")),
-        },
-    }
-
-    local cards = {}
-    for _, row in ipairs(payload.recap or {}) do
-        local lines = {}
-        if row.led > 0 or row.assisted > 0 then
-            lines[#lines + 1] = string.format("Led %d  |  Assisted %d", row.led, row.assisted)
-        else
-            lines[#lines + 1] = "Stood by"
-        end
-        if row.read > 0 then
-            lines[#lines + 1] = string.format("Read the room %d", row.read)
-        end
-        if row.bestTier ~= nil then
-            lines[#lines + 1] = string.format("Best Tier %d", row.bestTier)
-        end
-        cards[#cards + 1] = THCWidgets.RecapCard(row, lines)
-    end
-
-    children[#children + 1] = gui.Panel{
-        interactable = false,
-        width = "auto",
-        maxWidth = "100%",
-        height = "auto",
-        flow = "horizontal",
-        wrap = true,
-        halign = "center",
-        valign = "top",
-        children = cards,
-    }
-
-    children[#children + 1] = gui.Button{
-        classes = { "sizeM" },
-        width = 140,
-        height = 36,
-        text = "Close",
-        halign = "center",
-        valign = "top",
-        vmargin = 16,
-        click = function(element)
-            local view = element:FindParentWithClass("negPlayerView")
-            if view ~= nil then
-                view:DestroySelf()
+        RecapLines = function(row)
+            local lines = {}
+            if row.led > 0 or row.assisted > 0 then
+                lines[#lines + 1] = string.format("Led %d  |  Assisted %d", row.led, row.assisted)
+            else
+                lines[#lines + 1] = "Stood by"
             end
+            if row.read > 0 then
+                lines[#lines + 1] = string.format("Read the room %d", row.read)
+            end
+            if row.bestTier ~= nil then
+                lines[#lines + 1] = string.format("Best Tier %d", row.bestTier)
+            end
+            return lines
         end,
-    }
-
-    return gui.Panel{
-        width = "80%",
-        height = "auto",
-        flow = "vertical",
-        halign = "center",
-        valign = "center",
-        children = children,
     }
 end
