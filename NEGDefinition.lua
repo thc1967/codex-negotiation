@@ -39,12 +39,17 @@ end
 --- @field showInterest boolean whether the table sees the interest scale
 --- @field showPatience boolean whether the table sees the patience scale
 --- @field folderId string
+--- @field folderName string the folder as named when the negotiation was filed, so an import can rebuild it
 --- @field slug string a name-derived key, unique across the library
 NEGDefinition = RegisterGameType("NEGDefinition")
 
 --- Declared on the type so a negotiation authored before slugs existed reads
 --- as "" rather than raising, which is what EnsureSlug backfills from.
 NEGDefinition.slug = ""
+
+--- The data table the negotiations are rows of, which is also the heading
+--- the Create Module picker shows them under.
+NEGDefinition.tableName = "Negotiations"
 
 NEGDefinition.name = "New Negotiation"
 NEGDefinition.npcName = ""
@@ -53,6 +58,7 @@ NEGDefinition.languageId = ""
 NEGDefinition.attitudeId = "neutral"
 NEGDefinition.summary = ""
 NEGDefinition.folderId = ""
+NEGDefinition.folderName = ""
 NEGDefinition.impression = NEGConstants.impressionDefault
 
 --- Declared on the type so the scales read correctly before anyone has
@@ -149,6 +155,7 @@ mod:RegisterDocumentForCheckpointBackups(NEGConstants.libraryDoc)
 --- the noun on an undo entry and the attitude a new negotiation opens on.
 local g_library = THCLibrary.CreateNew{
     mod = mod,
+    tableName = NEGDefinition.tableName,
     docId = NEGConstants.libraryDoc,
     noun = "negotiation",
     defaultName = "New Negotiation",
@@ -165,10 +172,10 @@ local g_library = THCLibrary.CreateNew{
 --- @return LuaCodeModDocumentSnapshot
 function NEGDefinition.Doc() return g_library:Doc() end
 
---- @return string monitorGame path for the library
+--- @return string monitorGame path for the folders
 function NEGDefinition.DocPath() return g_library:DocPath() end
 
---- Mutate the library inside one document change.
+--- Mutate the library as one step.
 --- @param description string
 --- @param fn fun(definitions: table<string, NEGDefinition>)
 function NEGDefinition.Mutate(description, fn) g_library:Mutate(description, fn) end

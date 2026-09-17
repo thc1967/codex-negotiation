@@ -499,8 +499,8 @@ function NEGEditorPanel.Create()
         valign = "top",
         vscroll = true,
 
-        monitorGame = NEGDefinition.DocPath(),
-        refreshGame = function(element)
+        monitorAssets = true,
+        refreshAssets = function(element)
             element:FireEvent("rebuild")
         end,
 
