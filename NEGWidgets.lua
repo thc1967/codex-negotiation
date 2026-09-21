@@ -52,7 +52,7 @@ function NEGWidgets.EyeToggle(args)
         valign = "center",
         lmargin = args.lmargin or 6,
         bgimage = cond(shown, NEGConstants.iconEyeShown, NEGConstants.iconEyeHidden),
-        hover = gui.Tooltip(cond(shown,
+        hover = THCWidgets.Tooltip(cond(shown,
             args.tooltipShown or "The table can see this. Click to hide it.",
             args.tooltipHidden or "Hidden from the table. Click to show it.")),
         press = function()
@@ -155,16 +155,16 @@ function NEGWidgets.Scale(args)
         }
 
         if args.unknown then
-            pipArgs.hover = gui.Tooltip("The Director has not shared this.")
+            pipArgs.hover = THCWidgets.Tooltip("The Director has not shared this.")
         elseif args.interactive and args.change ~= nil then
             --Every bubble carries its own number, so clicking one sets it.
             if i >= minValue and i <= maxValue then
-                pipArgs.hover = gui.Tooltip(string.format("Set %s to %d", label, i))
+                pipArgs.hover = THCWidgets.Tooltip(string.format("Set %s to %d", label, i))
                 pipArgs.press = function()
                     args.change(i)
                 end
             else
-                pipArgs.hover = gui.Tooltip(
+                pipArgs.hover = THCWidgets.Tooltip(
                     string.format("A negotiation cannot open at %s %d.", label, i))
             end
         end
@@ -321,7 +321,7 @@ function NEGWidgets.HeroToken(charid, name, draggable, rightClick, dimmed)
             end
         end,
 
-        hover = gui.Tooltip(name or ""),
+        hover = THCWidgets.Tooltip(name or ""),
 
         data = { charid = charid },
 
@@ -420,7 +420,7 @@ function NEGWidgets.Slot(args)
         halign = "center",
         valign = "top",
         dragTarget = not inert,
-        hover = gui.Tooltip(args.label or ""),
+        hover = THCWidgets.Tooltip(args.label or ""),
 
         dropOnSlot = function(element, dropped)
             args.place(dropped)

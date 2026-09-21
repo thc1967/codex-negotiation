@@ -27,6 +27,7 @@ end
 --- @field name string what the negotiation is called
 --- @field npcName string who the heroes are facing
 --- @field portraitid string the NPC's picture, from the Avatar library
+--- @field image string the backdrop the table sees, from the Cover Art library
 --- @field languageId string the NPC's native language
 --- @field attitudeId string a NEGRules.attitudes id
 --- @field interest number starting interest
@@ -54,6 +55,7 @@ NEGDefinition.tableName = "Negotiations"
 NEGDefinition.name = "New Negotiation"
 NEGDefinition.npcName = ""
 NEGDefinition.portraitid = ""
+NEGDefinition.image = ""
 NEGDefinition.languageId = ""
 NEGDefinition.attitudeId = "neutral"
 NEGDefinition.summary = ""

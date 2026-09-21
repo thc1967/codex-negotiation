@@ -203,7 +203,7 @@ function NEGDialog.Create()
         halign = "right",
         valign = "center",
         interactable = false,
-        hover = gui.Tooltip("Put this negotiation in front of the table"),
+        hover = THCWidgets.Tooltip("Put this negotiation in front of the table"),
         click = function(element)
             if not element.interactable or m_selectedDefid == nil then
                 return
@@ -259,7 +259,7 @@ function NEGDialog.Create()
                 text = "Reset",
                 halign = "center",
                 valign = "center",
-                hover = gui.Tooltip("Throw the whole negotiation away and go back to the library"),
+                hover = THCWidgets.Tooltip("Throw the whole negotiation away and go back to the library"),
                 click = function()
                     NEGRun.Clear()
                 end,
@@ -271,7 +271,7 @@ function NEGDialog.Create()
                 text = "End Negotiation",
                 halign = "right",
                 valign = "center",
-                hover = gui.Tooltip("Close the negotiation. The final offer stays on screen."),
+                hover = THCWidgets.Tooltip("Close the negotiation. The final offer stays on screen."),
                 click = function()
                     NEGRun.End()
                 end,
@@ -295,7 +295,7 @@ function NEGDialog.Create()
                 text = "Back to Library",
                 halign = "center",
                 valign = "center",
-                hover = gui.Tooltip("Take this negotiation off the table, awarding nothing"),
+                hover = THCWidgets.Tooltip("Take this negotiation off the table, awarding nothing"),
                 click = function()
                     NEGRun.Clear()
                 end,

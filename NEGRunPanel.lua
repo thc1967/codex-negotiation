@@ -93,7 +93,7 @@ local function TraitRow(entry, kind, director)
             halign = "left",
             valign = "center",
             lmargin = 6,
-            hover = gui.Tooltip(
+            hover = THCWidgets.Tooltip(
                 "They argued into this pitfall. No roll: interest -1, patience -1, "
                 .. "the pitfall is shown to the table, and the argument's heroes go "
                 .. "back to the tray spent."),
@@ -379,7 +379,7 @@ function NEGRunPanel.CreateSetup()
                     text = "Cancel",
                     halign = "left",
                     valign = "center",
-                    hover = gui.Tooltip("Back to the library. Nothing is kept."),
+                    hover = THCWidgets.Tooltip("Back to the library. Nothing is kept."),
                     click = function()
                         NEGRun.Discard()
                     end,
@@ -469,7 +469,7 @@ local function TrackPanel(live, args)
             halign = "left",
             valign = "center",
             rmargin = 8,
-            hover = gui.Tooltip("Clear this track. Whoever rolled goes back to the tray, spent."),
+            hover = THCWidgets.Tooltip("Clear this track. Whoever rolled goes back to the tray, spent."),
             click = function()
                 NEGRun.ResetTrack(args.track, slotKeys)
             end,
@@ -483,7 +483,7 @@ local function TrackPanel(live, args)
             halign = "left",
             valign = "center",
             rmargin = 8,
-            hover = gui.Tooltip("Waiting on the roll. Press to take it back."),
+            hover = THCWidgets.Tooltip("Waiting on the roll. Press to take it back."),
             click = function()
                 NEGRun.CancelRoll()
             end,
@@ -497,7 +497,7 @@ local function TrackPanel(live, args)
             halign = "left",
             valign = "center",
             rmargin = 8,
-            hover = gui.Tooltip(cond(blocked,
+            hover = THCWidgets.Tooltip(cond(blocked,
                 "Waiting on the other track's roll",
                 cond(ready,
                     "Request rolls",
@@ -695,7 +695,7 @@ local function TrackPanel(live, args)
                         halign = "left",
                         valign = "center",
                         bgimage = NEGConstants.iconMotivation,
-                        hover = gui.Tooltip(cond(appealing,
+                        hover = THCWidgets.Tooltip(cond(appealing,
                             "Appealing to motivation",
                             "Not appealing to motivation")),
                         press = function()
@@ -716,7 +716,7 @@ local function TrackPanel(live, args)
                     valign = "center",
                     lmargin = cond(#toggles > 0, 6, 0),
                     bgimage = NEGConstants.iconRenown,
-                    hover = gui.Tooltip(cond(edging,
+                    hover = THCWidgets.Tooltip(cond(edging,
                         "Influencing with Renown",
                         "Not influencing with Renown")),
                     press = function()
@@ -831,7 +831,7 @@ function NEGRunPanel.Create(args)
         height = 24,
         halign = "left",
         valign = "center",
-        hover = gui.Tooltip(
+        hover = THCWidgets.Tooltip(
             "Show the table both scales, the offer, and the real tier outcomes on "
             .. "their roll dialogs. Motivations and pitfalls stay behind their eyes."),
         change = function(element)
@@ -1188,7 +1188,7 @@ function NEGRunPanel.Create(args)
                         valign = "center",
                         lmargin = 4,
                         bgimage = NEGConstants.iconDevil,
-                        hover = gui.Tooltip(cond(devil,
+                        hover = THCWidgets.Tooltip(cond(devil,
                             "Devil's bargain: Interest runs to 10 and is halved to name the offer. Click for a normal track.",
                             "Normal Interest. Click for a devil's doubled track.")),
                         press = function()

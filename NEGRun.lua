@@ -367,6 +367,11 @@ function NEGRun.BeginSetup(defid, docid)
     NEGRun.Mutate("Begin negotiation setup", function(data)
         data.live = live
     end)
+
+    --The table gets the backdrop over everything while the Director sets up;
+    --the Director is left looking at the map, since "players" excludes them.
+    THCUtils.ShowScene(def:try_get("image", ""), true, false)
+
     return true
 end
 
@@ -443,6 +448,13 @@ function NEGRun.Start()
         target.languageBonus = bonus
         target.languageSpeakers = speakers
     end)
+
+    --Play begins, so the backdrop drops behind the interface and the Director
+    --joins the table in seeing it. After the mutate: one document at a time.
+    local def = live:Definition()
+    if def ~= nil then
+        THCUtils.ShowScene(def:try_get("image", ""), "all", true)
+    end
 end
 
 --- Back to setup, scales restored to what the negotiation was prepared with.

@@ -134,7 +134,7 @@ function NEGEndingPanel.Create(opts)
         text = "Complete",
         halign = "right",
         valign = "center",
-        hover = gui.Tooltip("Award the Victories, announce the result, clear the negotiation"),
+        hover = THCWidgets.Tooltip("Award the Victories, announce the result, clear the negotiation"),
         click = function()
             --A value typed and never blurred has not reached the Run yet.
             NEGRun.SetEndingVictories(tonumber(victoryInput.text) or 0)

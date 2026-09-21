@@ -228,10 +228,14 @@ NEGConstants.sectionWidth = "100%-16"
 NEGConstants.offerRowHeight = 68
 NEGConstants.offerLabelWidth = 130
 
--- The NPC's picture. Small: it is a reminder, not the subject of the page.
-NEGConstants.portraitWidth = 128
-NEGConstants.portraitHeight = 192
-NEGConstants.portraitColumnWidth = 136
+-- The NPC's picture. Small: it is a reminder, not the subject of the page,
+-- and the backdrop shares its column.
+NEGConstants.portraitWidth = 96
+NEGConstants.portraitHeight = 144
+NEGConstants.portraitColumnWidth = 104
+
+-- The backdrop under the portrait, 16:9 against the portrait's width.
+NEGConstants.backdropHeight = 54
 
 -- Field limits
 NEGConstants.nameLimit = 80

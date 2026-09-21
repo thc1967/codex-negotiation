@@ -48,7 +48,7 @@ local function TraitCard(defid, kind, row, used)
                 classes = { "deleteButton", "sizeXs" },
                 halign = "right",
                 valign = "center",
-                hover = gui.Tooltip("Remove this one"),
+                hover = THCWidgets.Tooltip("Remove this one"),
                 click = function()
                     NEGDefinition.RemoveTrait(defid, kind, rowId)
                 end,
@@ -110,7 +110,7 @@ local function TraitColumn(defid, def, kind, title, expected)
                 halign = "left",
                 valign = "center",
                 interactable = remaining > 0,
-                hover = gui.Tooltip(cond(remaining > 0,
+                hover = THCWidgets.Tooltip(cond(remaining > 0,
                     string.format("Add one (%d left)", remaining),
                     "All twelve are spoken for")),
                 click = function()
@@ -136,7 +136,7 @@ local function TraitColumn(defid, def, kind, title, expected)
                 valign = "center",
                 lmargin = 6,
                 bgimage = NEGConstants.iconConfigured,
-                hover = gui.Tooltip(string.format(
+                hover = THCWidgets.Tooltip(string.format(
                     "The rules ask for at least %d. This NPC has %d.", expected, #rows)),
             },
         },
@@ -268,6 +268,30 @@ function NEGEditorPanel.Create()
         end,
     }
 
+    local backdropPicker = THCWidgets.ScenePicker{
+        height = NEGConstants.backdropHeight,
+        halign = "center",
+        change = function(value)
+            if m_defid ~= nil then
+                NEGDefinition.SetField(m_defid, "image", value or "")
+            end
+        end,
+    }
+
+    --- @param text string
+    --- @return Panel
+    local function PictureCaption(text)
+        return gui.Label{
+            classes = { "sizeXxs", "fg" },
+            width = "auto",
+            height = "auto",
+            halign = "center",
+            valign = "top",
+            tmargin = 2,
+            text = text,
+        }
+    end
+
     local portraitColumn = gui.Panel{
         width = NEGConstants.portraitColumnWidth,
         height = "auto",
@@ -276,16 +300,10 @@ function NEGEditorPanel.Create()
         valign = "top",
 
         portraitEditor,
+        PictureCaption("Counterpart"),
 
-        gui.Label{
-            classes = { "sizeXxs", "fgMuted" },
-            width = "auto",
-            height = "auto",
-            halign = "center",
-            valign = "top",
-            tmargin = 2,
-            text = "1000x1500 image",
-        },
+        backdropPicker,
+        PictureCaption("Backdrop"),
     }
 
     local summaryInput = gui.Input{
@@ -525,6 +543,7 @@ function NEGEditorPanel.Create()
             npcInput.text = def:try_get("npcName", "")
             summaryInput.text = def:try_get("summary", "")
             portraitEditor.value = def:try_get("portraitid", "")
+            backdropPicker.value = def:try_get("image", "")
             impressionDropdown.idChosen = tostring(def:try_get("impression",
                 NEGConstants.impressionDefault))
 
@@ -574,7 +593,7 @@ function NEGEditorPanel.Create()
                         valign = "center",
                         lmargin = 4,
                         bgimage = NEGConstants.iconDevil,
-                        hover = gui.Tooltip(cond(devil,
+                        hover = THCWidgets.Tooltip(cond(devil,
                             "Devil's bargain: Interest runs to 10 and is halved to name the offer. Click for a normal track.",
                             "Normal Interest. Click for a devil's doubled track.")),
                         press = function()

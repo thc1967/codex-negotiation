@@ -96,7 +96,7 @@ local function CreateRow(def, index, selectedId, onSelect, indent)
             halign = "left",
             valign = "center",
             bgimage = NEGConstants.iconConfigured,
-            hover = gui.Tooltip(cond(configured,
+            hover = THCWidgets.Tooltip(cond(configured,
                 "Ready to run",
                 "Needs an NPC, two motivations and a pitfall")),
         },
@@ -117,7 +117,7 @@ local function CreateRow(def, index, selectedId, onSelect, indent)
                 valign = "center",
                 hmargin = 2,
                 interactable = otherRunning == nil and running == nil,
-                hover = gui.Tooltip(playTooltip),
+                hover = THCWidgets.Tooltip(playTooltip),
                 click = function()
                     onSelect(defid)
                     NEGRun.BeginSetup(defid)
@@ -130,7 +130,7 @@ local function CreateRow(def, index, selectedId, onSelect, indent)
                 halign = "right",
                 valign = "center",
                 hmargin = 2,
-                hover = gui.Tooltip("More"),
+                hover = THCWidgets.Tooltip("More"),
                 click = function(element)
                     element.popup = gui.ContextMenu{
                         entries = {
@@ -427,7 +427,7 @@ function NEGLibraryPanel.Create(onSelect, onImport)
                 halign = "right",
                 valign = "center",
                 hmargin = 4,
-                hover = gui.Tooltip("Import a negotiation"),
+                hover = THCWidgets.Tooltip("Import a negotiation"),
                 click = function()
                     onImport()
                 end,
@@ -441,7 +441,7 @@ function NEGLibraryPanel.Create(onSelect, onImport)
                 halign = "right",
                 valign = "center",
                 hmargin = 4,
-                hover = gui.Tooltip("New folder"),
+                hover = THCWidgets.Tooltip("New folder"),
                 click = function()
                     NEGDefinition.CreateFolder()
                 end,
@@ -451,7 +451,7 @@ function NEGLibraryPanel.Create(onSelect, onImport)
                 classes = { "addButton", "sizeS" },
                 halign = "right",
                 valign = "center",
-                hover = gui.Tooltip("Prepare a new negotiation"),
+                hover = THCWidgets.Tooltip("Prepare a new negotiation"),
                 click = function(element)
                     local defid = NEGDefinition.CreateInLibrary()
                     local controller = element:FindParentWithClass(ROOT_CLASS)
