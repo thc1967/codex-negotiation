@@ -53,7 +53,7 @@ local function CreateRow(def, index, selectedId, onSelect, indent)
 
         draggable = true,
         canDragOnto = function(element, target)
-            return target ~= nil and target:HasClass(DROP_CLASS)
+            return target ~= nil and target:HasClass(DROP_CLASS) and THCWidgets.RowOverWindow()
         end,
 
         beginDrag = function(element)
@@ -63,10 +63,18 @@ local function CreateRow(def, index, selectedId, onSelect, indent)
             end
         end,
 
+        --Dragged out over the bare table, the negotiation's icon follows the mouse.
+        dragging = function(element, target)
+            THCWidgets.TableIconDragging(element, NEGConstants.tableIconKind, defid)
+        end,
+
         drag = function(element, target)
             local controller = element:FindParentWithClass(ROOT_CLASS)
             if controller ~= nil then
                 controller:FireEventTree("setDragging", false)
+            end
+            if THCWidgets.TableIconDropped(element, NEGConstants.tableIconKind, defid) then
+                return
             end
             if target ~= nil then
                 NEGDefinition.SetFolder(defid, target.data.folderId or "")
@@ -132,30 +140,40 @@ local function CreateRow(def, index, selectedId, onSelect, indent)
                 hmargin = 2,
                 hover = THCWidgets.Tooltip("More"),
                 click = function(element)
-                    element.popup = gui.ContextMenu{
-                        entries = {
-                            {
-                                text = "Copy Slug",
-                                click = function()
-                                    element.popup = nil
-                                    dmhub.CopyToClipboard(NEGDefinition.EnsureSlug(defid))
-                                end,
-                            },
-                            {
-                                text = "Duplicate",
-                                click = function()
-                                    element.popup = nil
-                                    NEGDefinition.Duplicate(defid)
-                                end,
-                            },
-                            {
-                                text = "Delete",
-                                click = function()
-                                    element.popup = nil
-                                    NEGDefinition.Delete(defid)
-                                end,
-                            },
+                    local entries = {
+                        {
+                            text = "Copy Slug",
+                            click = function()
+                                element.popup = nil
+                                dmhub.CopyToClipboard(NEGDefinition.EnsureSlug(defid))
+                            end,
                         },
+                        {
+                            text = "Duplicate",
+                            click = function()
+                                element.popup = nil
+                                NEGDefinition.Duplicate(defid)
+                            end,
+                        },
+                    }
+                    if THCWidgets.TableIconsAvailable() then
+                        entries[#entries + 1] = {
+                            text = "Put on the Table",
+                            click = function()
+                                element.popup = nil
+                                THCWidgets.PutOnTable(NEGConstants.tableIconKind, defid)
+                            end,
+                        }
+                    end
+                    entries[#entries + 1] = {
+                        text = "Delete",
+                        click = function()
+                            element.popup = nil
+                            NEGDefinition.Delete(defid)
+                        end,
+                    }
+                    element.popup = gui.ContextMenu{
+                        entries = entries,
                     }
                 end,
             },

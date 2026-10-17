@@ -511,6 +511,45 @@ LaunchablePanel.Register{
     end,
 }
 
+--- The hover's details line for a negotiation's table icon.
+--- @param defid string
+--- @return string[]
+local function TableIconDetails(defid)
+    local lines = {}
+    local def = NEGDefinition.GetByID(defid)
+    if def ~= nil then
+        if (def.npcName or "") ~= "" then
+            lines[#lines + 1] = def.npcName
+        end
+        local attitude = NEGRules.AttitudeById(def.attitudeId)
+        if attitude ~= nil then
+            lines[#lines + 1] = attitude.text
+        end
+    end
+    local live = NEGRun.ActiveFor(defid)
+    if live ~= nil and live.status == NEGConstants.statusRunning then
+        lines[#lines + 1] = "Running"
+    elseif live ~= nil and live.status == NEGConstants.statusSetup then
+        lines[#lines + 1] = "Setting up"
+    end
+    lines[#lines + 1] = "Click to open"
+    return lines
+end
+
+THCWidgets.RegisterTableIcon{
+    kind = NEGConstants.tableIconKind,
+    icon = NEGConstants.icon,
+    exists = function(defid)
+        return NEGDefinition.GetByID(defid) ~= nil
+    end,
+    name = function(defid)
+        local def = NEGDefinition.GetByID(defid)
+        return def ~= nil and def.name or ""
+    end,
+    details = TableIconDetails,
+    open = NEGDialog.Open,
+}
+
 --Director-only; RegisterSlugMacro gates it, so a player never sees it in
 --their completions.
 THCCommands.RegisterSlugMacro{

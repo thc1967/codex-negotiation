@@ -10,6 +10,7 @@ NEGConstants.panelName = "Negotiation"         -- keys the launchable panel
 NEGConstants.panelTitle = "Negotiation"        -- what the Director's window says
 NEGConstants.playerPanelTitle = "Negotiation"
 NEGConstants.icon = "phosphor/handshake.png"
+NEGConstants.tableIconKind = "thcnegotiation"  -- keys a negotiation's icon on the Director's tabletop
 
 --- The presented-dialog id. NOT "negotiation": the old feature registers that
 --- one unconditionally, outside its own feature flag, and two registrations
