@@ -402,36 +402,59 @@ function NEGRunPanel.CreateSetup()
     }
 end
 
---- One track: its slots, pickers and die.
+--- A small text button for the track header's next step.
+--- @param text string
+--- @param enabled boolean
+--- @param tooltip string|nil
+--- @param click fun()
+--- @return Panel
+local function StepButton(text, enabled, tooltip, click)
+    return gui.Button{
+        classes = { "sizeXs", cond(enabled, nil, "disabled") },
+        width = "auto",
+        height = 22,
+        halign = "right",
+        valign = "center",
+        lmargin = 6,
+        text = text,
+        interactable = enabled,
+        hover = tooltip ~= nil and THCWidgets.Tooltip(tooltip) or nil,
+        click = function(element)
+            if element.interactable then
+                click()
+            end
+        end,
+    }
+end
+
+--- One track: its seats, their picks and rolls, the Director's next step, and
+--- the tier table the Lead's roll lands on. The rolls themselves are
+--- THCRollFlow's; what stays here is Negotiation's own furniture - Renown,
+--- the appeal, the hidden Assist, the curtains.
 --- @param live NEGLive
---- @param args {track: string, title: string, slots: {key: string, label: string}[]}
+--- @param args {track: string, title: string, width: string, director: boolean, slots: {key: string, label: string}[], landed: table}
 --- @return Panel
 local function TrackPanel(live, args)
-    --A request belongs to ONE track. Read globally, an outstanding roll froze
-    --both and left the idle track's die silently dead.
-    local res = live:try_get("resolution")
-    local rolling = res ~= nil and res.track == args.track
-    local blocked = res ~= nil and res.track ~= args.track
+    local track = args.track
+    local flow = NEGRun.Flow(track)
+    local record = NEGRun.Record(live, track)
+    local eff = flow:Effective()
+
+    local pending = record.pending
+    local rolling = pending ~= nil
+    local leadRoll = record.rolls[THCRollFlow.slotLead]
+    local assistRoll = record.rolls[THCRollFlow.slotAssist]
+    local accepted = record.accepted == true
 
     --The curtain only stops clicks; a drop target is a separate mechanism, so
-    --the lockout has to make the slots inert as well.
-    local locked = args.track == NEGConstants.trackLearn
+    --the lockout has to make the seats inert as well.
+    local locked = track == NEGConstants.trackLearn
         and live:try_get("learnLocked", false)
 
-    --Read before the lockouts, because they read these. Staffed means a hero is
-    --standing in the track; settled means one of its slots holds a finished
-    --roll. Asking for a roll is the Director's call, so the table gets no die,
-    --and a track whose roll is in swaps its die for a reset.
-    local staffed = false
-    local settled = false
-    for _, slot in ipairs(args.slots) do
-        if NEGRun.Slot(live, slot.key) ~= nil then
-            staffed = true
-        end
-        if NEGRun.RollFor(live, slot.key) ~= nil then
-            settled = true
-        end
-    end
+    --Staffed means a hero is standing in the track; settled means one of its
+    --seats holds a roll.
+    local staffed = next(eff) ~= nil
+    local settled = next(record.rolls) ~= nil
 
     --Patience is spent, so nothing here can roll again. The table is told at
     --once. The Director keeps the track until they have cleared out whoever was
@@ -440,39 +463,17 @@ local function TrackPanel(live, args)
     local expired = live.patience <= NEGConstants.scaleMin
         and (not args.director or not (staffed or settled))
 
-    local sealed = rolling or locked or expired
+    local canStage = NEGRun.CanStage(live, track)
     local free = NEGRun.FreeHeroes(live)
 
-    --Ready means a hero is standing there, nothing more. Whether a roll is
-    --already out is TriggerRoll's business: it can tell a live request from a
-    --dead one, and clear the dead one rather than stay disabled forever.
-    local primary = args.slots[1].key
-    local ready = NEGRun.Slot(live, primary) ~= nil
-
-    local slotKeys = {}
-    for _, slot in ipairs(args.slots) do
-        slotKeys[#slotKeys + 1] = slot.key
-    end
-
+    --The die: send the first roll, take back the one out, or clear the track
+    --once anything has rolled - whatever else is waiting, so a track never
+    --sticks.
     local dieButton
     if not args.director then
         dieButton = gui.Panel{
             width = 0,
             height = 0,
-        }
-    elseif settled then
-        dieButton = gui.Button{
-            classes = { "sizeXs" },
-            icon = NEGConstants.iconReset,
-            width = 22,
-            height = 22,
-            halign = "left",
-            valign = "center",
-            rmargin = 8,
-            hover = THCWidgets.Tooltip("Clear this track. Whoever rolled goes back to the tray, spent."),
-            click = function()
-                NEGRun.ResetTrack(args.track, slotKeys)
-            end,
         }
     elseif rolling then
         dieButton = gui.Button{
@@ -485,30 +486,83 @@ local function TrackPanel(live, args)
             rmargin = 8,
             hover = THCWidgets.Tooltip("Waiting on the roll. Press to take it back."),
             click = function()
-                NEGRun.CancelRoll()
+                NEGRun.CancelRoll(track)
+            end,
+        }
+    elseif settled then
+        dieButton = gui.Button{
+            classes = { "sizeXs" },
+            icon = NEGConstants.iconReset,
+            width = 22,
+            height = 22,
+            halign = "left",
+            valign = "center",
+            rmargin = 8,
+            hover = THCWidgets.Tooltip("Clear this track. Whoever rolled goes back to the tray, spent."),
+            click = function()
+                NEGRun.ResetTrack(track)
             end,
         }
     else
+        local blocker = nil
+        if flow:NextSlot() == nil then
+            blocker = string.format("Put a hero in the %s slot first", args.slots[1].label)
+        elseif not flow:CanRoll() then
+            blocker = "This track cannot roll now."
+        else
+            blocker = flow:SendBlocker()
+        end
         dieButton = gui.Button{
-            classes = { "sizeXs", cond(ready, nil, "disabled") },
+            classes = { "sizeXs", cond(blocker == nil, nil, "disabled") },
             icon = NEGConstants.iconRoll,
             width = 22,
             height = 22,
             halign = "left",
             valign = "center",
             rmargin = 8,
-            hover = THCWidgets.Tooltip(cond(blocked,
-                "Waiting on the other track's roll",
-                cond(ready,
-                    "Request rolls",
-                    string.format("Put a hero in the %s slot first", args.slots[1].label)))),
+            hover = THCWidgets.Tooltip(blocker or "Request rolls"),
             click = function(element)
                 if element:HasClass("disabled") then
                     return
                 end
-                NEGRun.TriggerRoll(args.track)
+                NEGRun.Roll(track)
             end,
         }
+    end
+
+    --The step after a roll: the Lead's turn once the Assist is in, then the
+    --Director taking the Lead's roll.
+    local stepButton = nil
+    if args.director and not rolling and not accepted then
+        if leadRoll ~= nil then
+            stepButton = StepButton("Accept", true,
+                "Take this roll: the scales move and the track can no longer re-roll.",
+                function()
+                    NEGRun.AcceptTrack(track)
+                end)
+        elseif assistRoll ~= nil then
+            local blocker = cond(flow:CanRoll(), flow:SendBlocker(), "This track cannot roll now.")
+            stepButton = StepButton("Continue", blocker == nil, blocker or "Ask the Lead to roll.",
+                function()
+                    NEGRun.Roll(track)
+                end)
+        end
+    end
+
+    local header = {
+        dieButton,
+
+        gui.Label{
+            classes = { "sizeL" },
+            width = cond(stepButton ~= nil, "100%-120", "100%-30"),
+            height = "100%",
+            halign = "left",
+            valign = "center",
+            text = args.title,
+        },
+    }
+    if stepButton ~= nil then
+        header[#header + 1] = stepButton
     end
 
     --Fixed height, and the label sized in pixels. An auto-height label taking
@@ -521,17 +575,7 @@ local function TrackPanel(live, args)
             halign = "left",
             valign = "top",
             bmargin = 2,
-
-            dieButton,
-
-            gui.Label{
-                classes = { "sizeL" },
-                width = "100%-30",
-                height = "100%",
-                halign = "left",
-                valign = "center",
-                text = args.title,
-            },
+            children = header,
         },
     }
 
@@ -542,21 +586,20 @@ local function TrackPanel(live, args)
 
     for _, slot in ipairs(args.slots) do
         local slotKey = slot.key
-        local entry = NEGRun.Slot(live, slotKey)
-
-        local pickers = {}
-        local roll = NEGRun.RollFor(live, slotKey)
+        local entry = record.slots[slotKey]
+        local assignment = eff[slotKey]
+        local roll = record.rolls[slotKey]
 
         --Renown rides with the argument's two seats, which is where it is
         --weighed against the NPC's Impression.
         local renown = nil
-        if entry ~= nil and args.track == NEGConstants.trackArgument then
-            renown = NEGRules.Renown(entry.charid)
+        if assignment ~= nil and track == NEGConstants.trackArgument then
+            renown = NEGRules.Renown(assignment.charid)
         end
 
         --Only the Assist can be kept back, and only the Director decides it.
         local assistEye = nil
-        if args.director and slotKey == NEGConstants.slotAssist then
+        if args.director and slotKey == THCRollFlow.slotAssist then
             local assistShown = not live:try_get("assistHidden", false)
             assistEye = NEGWidgets.EyeToggle{
                 shown = assistShown,
@@ -570,122 +613,25 @@ local function TrackPanel(live, args)
             }
         end
 
-        if roll ~= nil then
-            --The choices are spent, so what they produced replaces them. Both
-            --windows get this: the table watched the dice, they should see the
-            --same numbers the Director is reading.
-            local isAssist = slotKey == NEGConstants.slotAssist
+        local column = {}
 
-            local parts = {}
-            if isAssist then
-                parts[#parts + 1] = string.format("Tier %d", roll.tier or 0)
-            end
-
-            parts[#parts + 1] = tostring(roll.total or 0)
-            parts[#parts + 1] = string.format("Natural %d", roll.naturalRoll or 0)
-            parts[#parts + 1] = string.format("%s %s",
-                NEGRules.CharacteristicName(roll.attrId),
-                NEGRules.SignedModifier(
-                    NEGRules.CharacteristicModifier(roll.charid, roll.attrId)))
-
-            if roll.skillId ~= nil and roll.skillId ~= "" then
-                parts[#parts + 1] = NEGRules.SkillName(roll.skillId)
-            else
-                parts[#parts + 1] = "no skill"
-            end
-
-            local boons = roll.boons or 0
-            local banes = roll.banes or 0
-            if boons > 0 then
-                parts[#parts + 1] = string.format("%d edge%s", boons, cond(boons == 1, "", "s"))
-            elseif banes > 0 then
-                parts[#parts + 1] = string.format("%d bane%s", banes, cond(banes == 1, "", "s"))
-            end
-
-            local verdict = string.format("Tier %d", roll.tier or 0)
-            if isAssist then
-                verdict = string.format("Grants %s",
-                    string.gsub(NEGRun.AssistGrant(roll.tier or 1), "_", " "))
-            end
-
-            pickers[#pickers + 1] = gui.Label{
-                classes = { "sizeS" },
-                width = "98%",
-                height = "auto",
-                halign = "left",
-                valign = "top",
-                markdown = true,
-                text = string.format("**%s**", verdict),
+        if assignment ~= nil and roll == nil then
+            local pickers = THCRollWidgets.Pickers{
+                characteristic = "Not one of the negotiation characteristics",
             }
+            pickers:FireEvent("setPickers", flow, slotKey, eff,
+                flow:CanEdit(slotKey) and NEGRun.CanManage(assignment.charid))
+            column[#column + 1] = pickers
 
-            pickers[#pickers + 1] = gui.Label{
-                classes = { "sizeXs", "noBold", "fgMuted" },
-                width = "98%",
-                height = "auto",
-                halign = "left",
-                valign = "top",
-                textWrap = true,
-                text = table.concat(parts, " | "),
-            }
-
-            --Withheld unless open: this is the tier read against the chosen
-            --ladder, so a table that sees it can derive the NPC's motivations.
-            local mayRead = args.director or live:try_get("open", false)
-
-            if mayRead and roll.outcomeText ~= nil and roll.outcomeText ~= "" then
-                pickers[#pickers + 1] = gui.Label{
-                    classes = { "sizeXs", "noBold", "warning" },
-                    width = "98%",
-                    height = "auto",
-                    halign = "left",
-                    valign = "top",
-                    tmargin = 2,
-                    textWrap = true,
-                    text = roll.outcomeText,
-                }
-            end
-        elseif entry ~= nil then
-            pickers[#pickers + 1] = gui.Dropdown{
-                classes = { "formStacked", "sizeXs" },
-                width = "98%",
-                height = 24,
-                halign = "left",
-                valign = "center",
-                vmargin = 1,
-                options = NEGRules.CharacteristicOptions(),
-                idChosen = entry.attrId,
-                interactable = not sealed,
-                change = function(element)
-                    NEGRun.SetSlotField(slotKey, "attrId", element.idChosen)
-                end,
-            }
-
-            pickers[#pickers + 1] = gui.Dropdown{
-                classes = { "formStacked", "sizeXs" },
-                width = "98%",
-                height = 24,
-                halign = "left",
-                valign = "center",
-                vmargin = 1,
-                options = NEGRules.SkillOptionsFor(entry.charid),
-                idChosen = entry.skillId or "",
-                interactable = not sealed,
-                change = function(element)
-                    NEGRun.SetSlotField(slotKey, "skillId", element.idChosen)
-                end,
-            }
-
-            --Only the lead argues. Set before the die goes out: it decides
-            --which ladder the returned tier is read against.
-            if args.director
-                and (slotKey == NEGConstants.slotLead
-                    or slotKey == NEGConstants.slotAssist) then
+            --Set before the die goes out: the appeal decides which ladder the
+            --Lead's tier is read against, and Renown edges that seat's own roll.
+            if args.director and track == NEGConstants.trackArgument and flow:CanEdit(slotKey) then
                 local toggles = {}
 
                 --The heart picks the ladder the argument's own tier is read
                 --against, which is the lead's business. An assist's tier never
                 --meets that ladder - it becomes the grant it hands the lead.
-                if slotKey == NEGConstants.slotLead then
+                if slotKey == THCRollFlow.slotLead then
                     local appealing = live:try_get("appealMotivation", false)
 
                     toggles[#toggles + 1] = gui.Panel{
@@ -704,9 +650,7 @@ local function TrackPanel(live, args)
                     }
                 end
 
-                --Either seat can lean on its own hero's Renown, and it edges
-                --that seat's own roll.
-                local edging = entry.renownEdge == true
+                local edging = entry ~= nil and entry.renownEdge == true
 
                 toggles[#toggles + 1] = gui.Panel{
                     classes = { cond(edging, "bgSuccess", "bgFgMuted") },
@@ -720,11 +664,11 @@ local function TrackPanel(live, args)
                         "Influencing with Renown",
                         "Not influencing with Renown")),
                     press = function()
-                        NEGRun.SetSlotField(slotKey, "renownEdge", not edging)
+                        flow:SetSlotField(slotKey, "renownEdge", not edging, "Set Renown")
                     end,
                 }
 
-                pickers[#pickers + 1] = gui.Panel{
+                column[#column + 1] = gui.Panel{
                     width = "98%",
                     height = 24,
                     flow = "horizontal",
@@ -736,9 +680,43 @@ local function TrackPanel(live, args)
             end
         end
 
+        local rollLines = THCRollWidgets.RollLines()
+        rollLines:FireEvent("setRoll", flow, slotKey, eff)
+        column[#column + 1] = rollLines
+
+        --What the Lead's roll does to the scales. Withheld unless open: it is
+        --read against the chosen ladder, so a table that sees it can derive the
+        --NPC's motivations.
+        if slotKey == THCRollFlow.slotLead and roll ~= nil
+            and (args.director or live:try_get("open", false)) then
+            local outcome = NEGRun.Outcome(live, track)
+            if outcome ~= nil and outcome.text ~= "" then
+                column[#column + 1] = gui.Label{
+                    classes = { "sizeXs", "noBold", "warning" },
+                    width = "98%",
+                    height = "auto",
+                    halign = "left",
+                    valign = "top",
+                    tmargin = 2,
+                    textWrap = true,
+                    text = cond(accepted, outcome.text, string.format("If taken: %s", outcome.text)),
+                }
+            end
+        end
+
+        if args.director then
+            local offline = THCRollWidgets.OfflineNotice()
+            offline:FireEvent("setCharid", (assignment ~= nil and roll == nil) and assignment.charid or nil)
+            column[#column + 1] = offline
+
+            local buttons = THCRollWidgets.DirectorButtons()
+            buttons:FireEvent("setButtons", flow, slotKey)
+            column[#column + 1] = buttons
+        end
+
         units[#units + 1] = gui.Panel{
             classes = { cond(not args.director
-                and slotKey == NEGConstants.slotAssist
+                and slotKey == THCRollFlow.slotAssist
                 and live:try_get("assistHidden", false), "collapsed") },
             width = unitWidth,
             height = "auto",
@@ -748,17 +726,18 @@ local function TrackPanel(live, args)
 
             NEGWidgets.Slot{
                 label = slot.label,
-                charid = entry ~= nil and entry.charid or nil,
-                name = entry ~= nil and NEGRun.ParticipantName(live, entry.charid) or "",
+                charid = assignment ~= nil and assignment.charid or nil,
+                name = assignment ~= nil and NEGRun.ParticipantName(live, assignment.charid) or "",
                 renown = renown,
                 labelTrailing = assistEye,
-                inert = sealed,
-                options = free,
+                inert = not canStage,
+                --A filled seat must be emptied first, so it offers only Remove.
+                options = cond(assignment ~= nil, {}, free),
                 place = function(charid)
-                    NEGRun.Stage(slotKey, charid)
+                    flow:Stage(slotKey, charid)
                 end,
                 clear = function()
-                    NEGRun.Unstage(slotKey)
+                    flow:Unstage(slotKey)
                 end,
             },
 
@@ -768,7 +747,7 @@ local function TrackPanel(live, args)
                 flow = "vertical",
                 halign = "left",
                 valign = "center",
-                children = pickers,
+                children = column,
             },
         }
     end
@@ -780,6 +759,25 @@ local function TrackPanel(live, args)
         halign = "left",
         valign = "top",
         children = units,
+    }
+
+    --The Lead's outcomes, the row the roll lands on lit. The track is rebuilt
+    --on every change, so the board remembers what it last showed and the
+    --table pulses only when that moves.
+    local tiers = NEGRun.TierTable(live, track, args.director)
+    local previous = args.landed[track]
+    tiers.pulse = previous ~= nil and previous ~= (tiers.landed or false) and tiers.landed ~= nil
+    args.landed[track] = tiers.landed or false
+
+    local tierTable = THCRollWidgets.TierTable()
+    tierTable:FireEvent("setTiers", tiers)
+    children[#children + 1] = gui.Panel{
+        width = "98%",
+        height = "auto",
+        halign = "left",
+        valign = "top",
+        tmargin = 6,
+        tierTable,
     }
 
     --Appended last, which is what puts it on top. A spent read is barred on
@@ -817,6 +815,11 @@ end
 --- @return {body: Panel}
 function NEGRunPanel.Create(args)
     local director = args.director == true
+
+    --The row each track's tier table last lit, false for none. The tracks are
+    --rebuilt on every change, so this is what tells a result arriving from one
+    --already there.
+    local m_landed = {}
 
     local impressionLabel = FieldValue()
 
@@ -1386,17 +1389,8 @@ function NEGRunPanel.Create(args)
 
             tray.children = {
                 NEGWidgets.Tray(NEGRun.FreeHeroes(live), function(charid)
-                    for _, slot in ipairs({
-                        NEGConstants.slotLead,
-                        NEGConstants.slotAssist,
-                        NEGConstants.slotLearn,
-                    }) do
-                        local entry = NEGRun.Slot(live, slot)
-                        if entry ~= nil and entry.charid == charid then
-                            NEGRun.Unstage(slot)
-                            return
-                        end
-                    end
+                    NEGRun.Flow(NEGConstants.trackArgument):Return(charid)
+                    NEGRun.Flow(NEGConstants.trackLearn):Return(charid)
                 end),
             }
 
@@ -1406,9 +1400,10 @@ function NEGRunPanel.Create(args)
                     title = "Make Argument",
                     width = NEGConstants.trackArgumentWidth,
                     director = director,
+                    landed = m_landed,
                     slots = {
-                        { key = NEGConstants.slotLead, label = "Lead" },
-                        { key = NEGConstants.slotAssist, label = "Assist" },
+                        { key = THCRollFlow.slotLead, label = "Lead" },
+                        { key = THCRollFlow.slotAssist, label = "Assist" },
                     },
                 }),
 
@@ -1417,8 +1412,9 @@ function NEGRunPanel.Create(args)
                     title = "Learn Motivation / Pitfall",
                     width = NEGConstants.trackLearnWidth,
                     director = director,
+                    landed = m_landed,
                     slots = {
-                        { key = NEGConstants.slotLearn, label = "Reader" },
+                        { key = THCRollFlow.slotLead, label = "Reader" },
                     },
                 }),
             }

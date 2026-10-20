@@ -56,17 +56,19 @@ NEGLive.presented = false
 NEGLive.revealedTraits = {}
 NEGLive.participants = {}
 
---- Who is standing where, keyed by slot: argumentLead, argumentAssist, learn.
---- Each entry is {charid, attrId, skillId}.
+--- Each track's roll lives in a THCRollFlow record of its own: `live.argument`
+--- (Lead and Assist) and `live.learn` (the reader, in the Lead slot). On top of
+--- the shared shape a record carries `accepted`, once the Director has taken
+--- the Lead's roll, and `outcome` {text, interest, patience}. Neither field is
+--- declared here: the flow writes into its record in place, and a shared
+--- default would take those writes instead of the document.
+
+--- Legacy: where a negotiation started before the tracks had records kept its
+--- seats and rolls. Declared so an old document still reads; MigrateLive moves
+--- them onto the records and empties them.
 NEGLive.slots = {}
-
---- A roll out with a player, or nil. {slot, track, actionId, actionFor}.
 NEGLive.resolution = nil
-
---- What the assist's roll earned the lead, harvested when it comes back.
 NEGLive.assistTier = 0
-
---- Completed rolls, keyed by slot.
 NEGLive.rolls = {}
 
 --- Whether the argument appeals to a motivation. Never sent to the roller;
@@ -109,8 +111,7 @@ NEGLive.history = {}
 --- The frozen closing report, built once when the negotiation ends.
 NEGLive.ending = nil
 
---- The assist's roller, held between the assist's roll and the lead's so the
---- pair land as one history entry. Cleared as that entry is written.
+--- Legacy, as `slots` above.
 NEGLive.assistPending = nil
 
 --- Append one settled event to the Run's history. Runs INSIDE a mutation, on
@@ -201,6 +202,8 @@ function NEGLive.FromDefinition(def)
         showPatience = def:try_get("showPatience", false),
         status = NEGConstants.statusSetup,
         presented = false,
+        argument = THCRollFlow.NewRecord(),
+        learn = THCRollFlow.NewRecord(),
     }
 end
 
@@ -309,13 +312,6 @@ end
 --- @return string monitorGame path for the live negotiation
 function NEGRun.DocPath()
     return mod:GetDocumentPath(NEGConstants.activeRunDoc)
-end
-
---- Whether this hero can be asked to roll. Checked live, not from setup.
---- @param charid string
---- @return boolean
-function NEGRun.CanBePrompted(charid)
-    return dmhub.GetTokenById(charid) ~= nil
 end
 
 --- @param description string
@@ -472,6 +468,8 @@ function NEGRun.Reset()
         and def:try_get("patience", NEGDefinition.patience)
         or NEGDefinition.patience
 
+    NEGRun.AbandonRolls()
+
     NEGRun.Mutate("Reset negotiation", function(data)
         local target = data.live
         if target == nil then
@@ -535,26 +533,46 @@ function NEGRun.IsOfferShared()
     return live ~= nil and live:try_get("offerShared", false)
 end
 
---- What is standing in one slot, or nil.
---- @param live NEGLive
---- @param slot string
+--- @param track string
+--- @return string the other track
+local function OtherTrack(track)
+    return cond(track == NEGConstants.trackArgument, NEGConstants.trackLearn, NEGConstants.trackArgument)
+end
+
+--- A track's roll record as it stands, or nil when there is no negotiation.
+--- One not yet made reads as empty.
+--- @param live NEGLive|nil
+--- @param track string
 --- @return table|nil
-function NEGRun.Slot(live, slot)
+function NEGRun.Record(live, track)
     if live == nil then
         return nil
     end
-    return live:try_get("slots", {})[slot]
+    return live:try_get(track) or THCRollFlow.NewRecord()
 end
 
---- Every hero at the table who is not already standing in a slot, each
+--- Whether a negotiation still keeps its seats and rolls the old way, waiting
+--- for the Director's client to move them onto the records.
+--- @param live NEGLive
+--- @return boolean
+local function HasLegacy(live)
+    return live:try_get("resolution") ~= nil
+        or next(live:try_get("slots", {})) ~= nil
+        or next(live:try_get("rolls", {})) ~= nil
+        or live:try_get("assistTier", 0) ~= 0
+end
+
+--- Every hero at the table who is not already standing in a seat, each
 --- carrying whether they have already taken a test this time around.
 --- @param live NEGLive
 --- @return {charid: string, name: string, acted: boolean}[]
 function NEGRun.FreeHeroes(live)
     local taken = {}
-    for _, entry in pairs(live:try_get("slots", {})) do
-        if entry.charid ~= nil then
-            taken[entry.charid] = true
+    for _, track in ipairs{ NEGConstants.trackArgument, NEGConstants.trackLearn } do
+        for _, entry in pairs(NEGRun.Record(live, track).slots) do
+            if entry.charid ~= nil then
+                taken[entry.charid] = true
+            end
         end
     end
 
@@ -575,34 +593,20 @@ function NEGRun.FreeHeroes(live)
 end
 
 --- Take one track off the floor: its heroes go back to the tray marked spent
---- and its roll is forgotten. Once everyone is spent the set clears, turning
+--- and its record starts over. Once everyone is spent the set clears, turning
 --- the round over. Runs INSIDE a document mutation, on the live it is handed.
 --- @param live NEGLive
 --- @param track string
---- @param slotKeys string[]
-local function ClearTrack(live, track, slotKeys)
+local function ClearTrack(live, track)
     local acted = {}
     for key, value in pairs(live.acted) do
         acted[key] = value
     end
 
-    local slots = {}
-    for key, entry in pairs(live.slots) do
-        slots[key] = entry
-    end
-
-    local rolls = {}
-    for key, value in pairs(live.rolls) do
-        rolls[key] = value
-    end
-
-    for _, slotKey in ipairs(slotKeys) do
-        local entry = slots[slotKey]
-        if entry ~= nil and entry.charid ~= nil then
+    for _, entry in pairs(NEGRun.Record(live, track).slots) do
+        if entry.charid ~= nil then
             acted[entry.charid] = true
         end
-        slots[slotKey] = nil
-        rolls[slotKey] = nil
     end
 
     --Everyone spent means nobody is.
@@ -617,12 +621,10 @@ local function ClearTrack(live, track, slotKeys)
     end
 
     live.acted = acted
-    live.slots = slots
-    live.rolls = rolls
+    live[track] = THCRollFlow.NewRecord()
 
     --Clearing a read locks it; clearing an argument is what frees it again.
     if track == NEGConstants.trackArgument then
-        live.assistTier = 0
         live.appealMotivation = false
         live.learnLocked = false
     else
@@ -630,73 +632,157 @@ local function ClearTrack(live, track, slotKeys)
     end
 end
 
---- Clear one track for the next argument.
+--- Clear one track for the next argument, dropping any roll still out on it.
 --- @param track string
---- @param slotKeys string[]
-function NEGRun.ResetTrack(track, slotKeys)
+function NEGRun.ResetTrack(track)
+    NEGRun.Flow(track):Abandon()
     NEGRun.Mutate("Reset negotiation track", function(data)
         local live = data.live
         if live == nil then
             return
         end
-        ClearTrack(live, track, slotKeys)
+        ClearTrack(live, track)
     end)
 end
 
---- Copy, change, put back. Never writes into the type's shared default table.
---- @param slot string
---- @param apply fun(entry: table|nil): table|nil
---- @param description string
-local function MutateSlot(slot, apply, description)
-    NEGRun.Mutate(description, function(data)
-        local live = data.live
-        if live == nil then
-            return
-        end
-
-        local slots = {}
-        for key, entry in pairs(live.slots) do
-            slots[key] = entry
-        end
-        slots[slot] = apply(slots[slot])
-        live.slots = slots
-    end)
+--- Whether patience is spent, which ends every roll.
+--- @param live NEGLive
+--- @return boolean
+local function Expired(live)
+    return live.patience <= NEGConstants.scaleMin
 end
 
---- Stand a hero in a slot, taking them off any other: one hero cannot both
---- lead an argument and read the room.
---- @param slot string
---- @param charid string
-function NEGRun.Stage(slot, charid)
-    NEGRun.Mutate("Place negotiator", function(data)
-        local live = data.live
-        if live == nil then
-            return
-        end
+--- Whether a track's seats may change hands: nothing out, nothing rolled,
+--- nothing taken, and the track itself open.
+--- @param live NEGLive|nil
+--- @param track string
+--- @return boolean
+function NEGRun.CanStage(live, track)
+    if live == nil or live:try_get("status") ~= NEGConstants.statusRunning or Expired(live) then
+        return false
+    end
+    if track == NEGConstants.trackLearn and live:try_get("learnLocked", false) then
+        return false
+    end
+    local record = NEGRun.Record(live, track)
+    return record.pending == nil and next(record.rolls) == nil and record.accepted ~= true
+end
 
-        local slots = {}
-        for key, entry in pairs(live.slots) do
-            if entry.charid ~= charid then
-                slots[key] = entry
+--- The roll flow over one track's record. Cheap: make one whenever needed.
+---
+--- Writes refuse while the negotiation still keeps the old shape, so nothing
+--- lands in a record before the Director's client has moved the old seats in.
+--- @param track string
+--- @return THCRollFlow
+function NEGRun.Flow(track)
+    local other = OtherTrack(track)
+
+    --The live being changed, while inside one of this flow's changes, so the
+    --one-hero rule can reach the other track in the same change.
+    local m_live = nil
+
+    return THCRollFlow.CreateNew{
+        read = function()
+            return NEGRun.Record(NEGRun.Active(), track)
+        end,
+
+        mutate = function(description, fn)
+            NEGRun.Mutate(description, function(data)
+                local live = data.live
+                if live == nil or HasLegacy(live) then
+                    return
+                end
+                local record = live:try_get(track)
+                local created = record == nil
+                if created then
+                    record = THCRollFlow.NewRecord()
+                end
+                m_live = live
+                fn(record)
+                m_live = nil
+                if created then
+                    live[track] = record
+                end
+            end)
+        end,
+
+        checkId = NEGConstants.rollCheckId,
+        characteristics = function()
+            return NEGConstants.argumentAttributes
+        end,
+        skills = function()
+            return {}
+        end,
+        anySkill = true,
+
+        title = function()
+            return cond(track == NEGConstants.trackLearn, "Read the room", "Make an argument")
+        end,
+
+        leadTiers = function()
+            local live = NEGRun.Active()
+            return live ~= nil and NEGRun.LeadTiers(live, track) or {}
+        end,
+
+        canStage = function()
+            return NEGRun.CanStage(NEGRun.Active(), track)
+        end,
+
+        --A seat's picks stay open until that seat rolls.
+        canEdit = function(slot)
+            local live = NEGRun.Active()
+            if live == nil or live:try_get("status") ~= NEGConstants.statusRunning or Expired(live) then
+                return false
             end
-        end
+            local record = NEGRun.Record(live, track)
+            return record.pending == nil and record.rolls[slot] == nil and record.accepted ~= true
+        end,
 
-        local existing = slots[slot]
-        slots[slot] = {
-            charid = charid,
-            attrId = existing ~= nil and existing.attrId or NEGConstants.argumentAttributes[1],
-            skillId = existing ~= nil and existing.skillId or "",
-        }
+        canRoll = function()
+            local live = NEGRun.Active()
+            return live ~= nil and live:try_get("status") == NEGConstants.statusRunning
+                and not Expired(live) and NEGRun.Record(live, track).accepted ~= true
+        end,
 
-        live.slots = slots
-    end)
-end
+        --One roll out across both tracks.
+        sendBlocker = function()
+            if NEGRun.Record(NEGRun.Active(), other).pending ~= nil then
+                return "Waiting on the other track's roll."
+            end
+            return nil
+        end,
 
---- @param slot string
-function NEGRun.Unstage(slot)
-    MutateSlot(slot, function()
-        return nil
-    end, "Remove negotiator")
+        --A hero already rolling or rolled on the other track stays there.
+        mayPlace = function(charid)
+            local record = NEGRun.Record(NEGRun.Active(), other)
+            for slot, entry in pairs(record.slots) do
+                if entry.charid == charid then
+                    return record.pending == nil and record.rolls[slot] == nil
+                end
+            end
+            return true
+        end,
+
+        release = function(charid)
+            if m_live == nil then
+                return
+            end
+            local record = m_live:try_get(other)
+            if record == nil then
+                return
+            end
+            for slot, entry in pairs(record.slots) do
+                if entry.charid == charid then
+                    record.slots[slot] = nil
+                end
+            end
+        end,
+
+        --Carried on the seat, so each roller answers only for their own Renown.
+        decorateInfo = function(slot, info, assignment, entry)
+            info.renownEdge = entry ~= nil and entry.renownEdge == true
+        end,
+    }
 end
 
 --- @param value boolean
@@ -746,54 +832,6 @@ function NEGRun.SetAppealMotivation(value)
             data.live.appealMotivation = value
         end
     end)
-end
-
-
---- The roll a slot has already made, or nil.
---- @param live NEGLive
---- @param slot string
---- @return table|nil
-function NEGRun.RollFor(live, slot)
-    if live == nil then
-        return nil
-    end
-    return live:try_get("rolls", {})[slot]
-end
-
---- Clear the floor for the next argument: slots emptied, rolls forgotten, the
---- assist's grant spent.
-function NEGRun.ClearFloor()
-    NEGRun.Mutate("Clear negotiation floor", function(data)
-        local live = data.live
-        if live == nil then
-            return
-        end
-        live.slots = {}
-        live.rolls = {}
-        live.assistTier = 0
-        live.appealMotivation = false
-    end)
-end
-
---- Every field is listed rather than copied wholesale, so anything new on a
---- slot entry has to be named here or the next write drops it.
---- @param slot string
---- @param key string "attrId", "skillId" or "renownEdge"
---- @param value any
-function NEGRun.SetSlotField(slot, key, value)
-    MutateSlot(slot, function(entry)
-        if entry == nil then
-            return nil
-        end
-        local updated = {
-            charid = entry.charid,
-            attrId = entry.attrId,
-            skillId = entry.skillId,
-            renownEdge = entry.renownEdge,
-        }
-        updated[key] = value
-        return updated
-    end, "Set negotiation test")
 end
 
 --- @param which string
@@ -897,11 +935,9 @@ function NEGRun.HitPitfall(rowId)
     --A pitfall is settled instead of a roll, so an argument already out with a
     --player is void. The request lives in the engine rather than the document,
     --so it has to be dropped before the mutation clears what names it.
-    local res = live:try_get("resolution")
-    local voided = res ~= nil and res.track == NEGConstants.trackArgument
-    if voided and res.actionId ~= nil then
-        THCRoll.Cancel(res.actionId)
-    end
+    local flow = NEGRun.Flow(NEGConstants.trackArgument)
+    flow:Abandon()
+    local seats = flow:Effective()
 
     local outcome = NEGRules.PitfallOutcome()
 
@@ -909,10 +945,6 @@ function NEGRun.HitPitfall(rowId)
         local target = data.live
         if target == nil then
             return
-        end
-
-        if voided then
-            target.resolution = nil
         end
 
         --Copied before write: a live that never got its own table would
@@ -932,20 +964,17 @@ function NEGRun.HitPitfall(rowId)
         --Interest moved, so the offer moved with it.
         target.offerShared = false
 
-        local lead = target.slots[NEGConstants.slotLead]
-        local assist = target.slots[NEGConstants.slotAssist]
         AppendHistory(target, {
             kind = "pitfall",
             motivation = false,
             traitId = rowId,
-            lead = lead ~= nil and lead.charid or nil,
-            assist = assist ~= nil and assist.charid or nil,
+            lead = seats.lead ~= nil and seats.lead.charid or nil,
+            assist = seats.assist ~= nil and seats.assist.charid or nil,
             interestDelta = outcome.interest,
             patienceDelta = outcome.patience,
         })
 
-        ClearTrack(target, NEGConstants.trackArgument,
-            { NEGConstants.slotLead, NEGConstants.slotAssist })
+        ClearTrack(target, NEGConstants.trackArgument)
     end)
 
     printf("NEG:: pitfall %s - interest%+d patience%+d",
@@ -981,17 +1010,13 @@ end
 --- final offer out before clearing it away.
 function NEGRun.End()
     local live = NEGRun.Active()
-    local res = live ~= nil and live:try_get("resolution") or nil
-    if res ~= nil and res.actionId ~= nil then
-        THCRoll.Cancel(res.actionId)
-    end
+    NEGRun.AbandonRolls()
 
     --The board stays up: the table reads the final offer off it. Clear takes
     --it down.
     NEGRun.Mutate("End negotiation", function(data)
         if data.live ~= nil then
             data.live.status = NEGConstants.statusEnded
-            data.live.resolution = nil
 
             --Frozen here: the report reads the history and the scales as they
             --stood at the close, and the Director may still move the pips
@@ -1197,28 +1222,10 @@ end
 -- ASKING A PLAYER TO ROLL
 --==============================================================================
 
---- The player-facing roll. Only the two grants are ours; THCRoll supplies the
---- rest of the check.
----
---- Both cross the wire as flat scalars and become modifiers here, where the
---- roller's creature is in hand. They stack: an assisted lead leaning on their
---- Renown carries the assist's grant and the edge.
-THCRoll.RegisterCheck{
-    id = NEGConstants.rollCheckId,
-    modifierRollType = NEGConstants.modifierRollType,
-
-    DecorateModifiers = function(check, creature, options, result)
-        local grant = check.info.assistGrant
-        if grant ~= nil and grant ~= "" then
-            local described = THCRoll.DescribeGrant(creature, options, grant,
-                check.info.assistName or "Assisted",
-                check.info.assistDescription or "An ally assisted this test.",
-                NEGConstants.modifierRollType)
-            if described ~= nil then
-                result[#result + 1] = described
-            end
-        end
-
+--- The player-facing roll. The assist's grant is THCRollFlow's; Renown is
+--- ours. They stack: an assisted lead leaning on their Renown carries both.
+THCRollFlow.RegisterCheck(NEGConstants.rollCheckId, NEGConstants.modifierRollType,
+    function(check, creature, options, result)
         --Leaning on Renown is always an edge, so the wire carries only that it
         --is on.
         if check.info.renownEdge == true then
@@ -1230,115 +1237,262 @@ THCRoll.RegisterCheck{
                 result[#result + 1] = described
             end
         end
-    end,
-}
+    end)
 
---- What an assist's tier hands the lead. The montage's ladder.
---- @param tier number
---- @return string modtype
-function NEGRun.AssistGrant(tier)
-    if tier >= 3 then
-        return "double_edge"
-    end
-    if tier >= 2 then
-        return "edge"
-    end
-    return "bane"
-end
-
---- What a roller is shown before they roll. An assist and a read of the room
---- always get their real ladders, which give nothing away. An argument gets
---- vague bands unless the negotiation is open, because its real ladder is read
---- against this NPC's motivations and so leaks them.
+--- What a Lead is shown before they roll. A read of the room always gets its
+--- real ladder, which gives nothing away. An argument gets vague bands unless
+--- the negotiation is open, because its real ladder is read against this
+--- NPC's motivations and so leaks them.
 --- @param live NEGLive
---- @param slot string
 --- @param track string
 --- @return string[]
-local function TiersFor(live, slot, track)
-    if slot == NEGConstants.slotAssist then
-        local tiers = {}
-        for tier = 1, 3 do
-            local grant = NEGRun.AssistGrant(tier)
-            tiers[tier] = string.format("The Lead rolls with %s %s",
-                cond(grant == "edge", "an", "a"),
-                string.gsub(grant, "_", " "))
-        end
-        return tiers
-    end
-
-    --Every NPC's read-the-room ladder is the same three results, so it gives
-    --nothing away and is never withheld. The argument ladder is the one that
-    --leaks: it is read against this NPC's own motivations.
+function NEGRun.LeadTiers(live, track)
     if track == NEGConstants.trackLearn then
         return NEGRules.TierText(track, false)
     end
-
     if live:try_get("open", false) then
         return NEGRules.TierText(track, live:try_get("appealMotivation", false))
     end
-
     return DeepCopy(NEGConstants.tierBands)
 end
 
---- Ask a hero's player for a test.
+--- What the Lead's roll comes to: as the Director took it, once taken, and
+--- read off the roll before that.
 --- @param live NEGLive
---- @param slot string
 --- @param track string
---- @param grant string|nil
---- @param grantFrom string|nil
---- @return string|nil actionId
-local function SendRequest(live, slot, track, grant, grantFrom)
-    local entry = NEGRun.Slot(live, slot)
-    if entry == nil then
+--- @return nil|{text: string, interest: number, patience: number}
+function NEGRun.Outcome(live, track)
+    local record = NEGRun.Record(live, track)
+    if record.outcome ~= nil then
+        return record.outcome
+    end
+    local roll = record.rolls[THCRollFlow.slotLead]
+    if roll == nil then
         return nil
     end
+    if track == NEGConstants.trackLearn then
+        return NEGRules.LearnOutcome(roll.tier or 1)
+    end
+    return NEGRules.ArgumentOutcome(roll.tier or 1,
+        live:try_get("appealMotivation", false), roll.naturalRoll)
+end
 
-    local attrName = NEGRules.CharacteristicName(entry.attrId)
+--- The tier table one viewer sees for a track. A read's outcomes give nothing
+--- away; an argument's are read against this NPC's motivations, so they are
+--- the Director's unless the negotiation is open. The tier itself is no
+--- secret: the table sees the roll.
+--- @param live NEGLive
+--- @param track string
+--- @param director boolean
+--- @return {labels: string[]|nil, landed: number|nil}
+function NEGRun.TierTable(live, track, director)
+    local roll = NEGRun.Record(live, track).rolls[THCRollFlow.slotLead]
+    local landed = THCRollFlow.LandedRow(roll, false)
 
-    local skills = {}
-    if entry.skillId ~= nil and entry.skillId ~= "" then
-        skills[1] = entry.skillId
+    local labels = nil
+    if track == NEGConstants.trackLearn then
+        labels = {}
+        for tier = 1, 3 do
+            labels[tier] = NEGRules.LearnOutcome(tier).text
+        end
+    elseif director or live:try_get("open", false) then
+        labels = NEGRules.TierText(track, live:try_get("appealMotivation", false))
     end
 
-    local title = cond(track == NEGConstants.trackLearn,
-        "Read the room", "Make an argument")
-    if slot == NEGConstants.slotAssist then
-        title = "Assist: Make an argument"
+    return { labels = labels, landed = landed }
+end
+
+--- Send whichever roll this track needs next. Director only.
+--- @param track string
+function NEGRun.Roll(track)
+    local live = NEGRun.Active()
+    if live == nil or live:try_get("status") ~= NEGConstants.statusRunning then
+        return
+    end
+    NEGRun.Flow(track):RollNext()
+end
+
+--- Drop the roll out on this track. The step is offered again.
+--- @param track string
+function NEGRun.CancelRoll(track)
+    NEGRun.Flow(track):Abandon()
+end
+
+--- Drop any roll out on either track, as ending or clearing the negotiation does.
+function NEGRun.AbandonRolls()
+    NEGRun.Flow(NEGConstants.trackArgument):Abandon()
+    NEGRun.Flow(NEGConstants.trackLearn):Abandon()
+end
+
+--- Read back any roll that has come in. Director only; safe on any refresh.
+function NEGRun.Pump()
+    local live = NEGRun.Active()
+    if not dmhub.isDM or live == nil or live:try_get("status") ~= NEGConstants.statusRunning then
+        return
+    end
+    NEGRun.Flow(NEGConstants.trackArgument):Pump()
+    NEGRun.Flow(NEGConstants.trackLearn):Pump()
+end
+
+--- The Director takes the Lead's roll: the scales move, the history records
+--- it, and the track can no longer roll or re-roll. Once only, however often
+--- it is pressed.
+--- @param track string
+function NEGRun.AcceptTrack(track)
+    local live = NEGRun.Active()
+    if not dmhub.isDM or live == nil then
+        return
     end
 
-    local explanation = string.format("%s (%s)", title, attrName)
+    local flow = NEGRun.Flow(track)
+    local record = flow:Record()
+    local roll = record.rolls[THCRollFlow.slotLead]
+    if roll == nil or record.pending ~= nil or record.accepted == true then
+        return
+    end
 
-    local check = RollCheck.new{
-        type = NEGConstants.rollCheckId,
-        id = NEGConstants.rollCheckId,
-        text = title,
-        explanation = explanation,
-        skills = skills,
-        modifiers = {},
-        options = { tiers = TiersFor(live, slot, track) },
-        info = {
-            attrid = entry.attrId,
-            explanation = explanation,
-            assistGrant = grant,
-            assistName = grant ~= nil
-                and string.format("Assisted by %s", grantFrom or "an ally") or nil,
-            assistDescription = grant ~= nil
-                and string.format("%s's assist gave you a %s.",
-                    grantFrom or "An ally", string.gsub(grant, "_", " ")) or nil,
+    local outcome = NEGRun.Outcome(live, track)
+    local seats = flow:Effective()
+    local lead = seats.lead ~= nil and seats.lead.charid or nil
+    local assist = seats.assist ~= nil and seats.assist.charid or nil
+    local reading = track == NEGConstants.trackLearn
 
-            --Carried on the seat, so each roller answers only for their own
-            --Renown. A seat with no toggle never sets it.
-            renownEdge = entry.renownEdge == true,
-        },
-    }
+    NEGRun.Mutate("Accept negotiation roll", function(data)
+        local target = data.live
+        local rec = target ~= nil and target:try_get(track) or nil
+        if rec == nil or rec.accepted == true or rec.pending ~= nil then
+            return
+        end
 
-    --The Director gets the game's own roll summary over the board, which is
-    --what brings Re-roll and Take Roll to a negotiation test.
-    return THCRoll.Send{
-        title = title,
-        charid = entry.charid,
-        check = check,
-    }
+        rec.accepted = true
+        rec.outcome = {
+            text = outcome.text,
+            interest = outcome.interest,
+            patience = outcome.patience,
+        }
+
+        --The ladder is unambiguous once the appeal is known. The scales stay
+        --clickable for what the rules leave to judgment: a caught lie, a
+        --well-roleplayed argument taken as a tier 3.
+        if outcome.interest ~= 0 then
+            target.interest = NEGConstants.Clamp(target.interest + outcome.interest,
+                NEGConstants.scaleMin, target:InterestMax())
+
+            --Interest moved, so the offer moved with it.
+            target.offerShared = false
+        end
+
+        if outcome.patience ~= 0 then
+            target.patience = NEGConstants.Clamp(target.patience + outcome.patience,
+                NEGConstants.scaleMin, NEGConstants.scaleMax)
+        end
+
+        --The assist folds into the lead's entry rather than becoming its own,
+        --so "led 2, assisted 1" counts without counting the argument twice.
+        AppendHistory(target, {
+            kind = cond(reading, "read", "argument"),
+            tier = roll.tier,
+            motivation = target.appealMotivation == true,
+            lead = cond(reading, nil, lead),
+            reader = cond(reading, lead, nil),
+            assist = cond(reading, nil, assist),
+            interestDelta = outcome.interest,
+            patienceDelta = outcome.patience,
+        })
+    end)
+
+    printf("NEG:: roll accepted track=%s tier=%d interest%+d patience%+d - %s",
+        tostring(track), roll.tier or 0, outcome.interest, outcome.patience, outcome.text)
+end
+
+--- Move a negotiation that started before the tracks had records onto them.
+--- Director only, and once: it runs while the old fields are still there.
+--- A roll still out is dropped and offered again; a roll the old code already
+--- applied is carried across as taken, so it is never applied twice.
+function NEGRun.MigrateLive()
+    local live = NEGRun.Active()
+    if not dmhub.isDM or live == nil or not HasLegacy(live) then
+        return
+    end
+
+    local res = live:try_get("resolution")
+    if res ~= nil and res.actionId ~= nil then
+        THCRoll.Cancel(res.actionId)
+    end
+
+    NEGRun.Mutate("Update negotiation", function(data)
+        local target = data.live
+        if target == nil or not HasLegacy(target) then
+            return
+        end
+
+        local oldSlots = target:try_get("slots", {})
+        local oldRolls = target:try_get("rolls", {})
+
+        --- @param entry table|nil
+        --- @return table|nil
+        local function Seat(entry)
+            if entry == nil or entry.charid == nil then
+                return nil
+            end
+            return {
+                charid = entry.charid,
+                attrId = entry.attrId,
+                skillId = entry.skillId,
+                renownEdge = entry.renownEdge,
+            }
+        end
+
+        --- @param roll table|nil
+        --- @return table|nil
+        local function Roll(roll)
+            if roll == nil then
+                return nil
+            end
+            return {
+                total = roll.total,
+                naturalRoll = roll.naturalRoll,
+                boons = roll.boons,
+                banes = roll.banes,
+                tier = roll.tier,
+            }
+        end
+
+        --- @param record table
+        --- @param roll table|nil the old lead roll, already applied
+        local function Taken(record, roll)
+            if roll == nil then
+                return
+            end
+            record.rolls[THCRollFlow.slotLead] = Roll(roll)
+            record.accepted = true
+            record.outcome = {
+                text = roll.outcomeText or "",
+                interest = roll.interestDelta or 0,
+                patience = roll.patienceDelta or 0,
+            }
+        end
+
+        local argument = THCRollFlow.NewRecord()
+        argument.slots[THCRollFlow.slotLead] = Seat(oldSlots[NEGConstants.slotLead])
+        argument.slots[THCRollFlow.slotAssist] = Seat(oldSlots[NEGConstants.slotAssist])
+        argument.rolls[THCRollFlow.slotAssist] = Roll(oldRolls[NEGConstants.slotAssist])
+        Taken(argument, oldRolls[NEGConstants.slotLead])
+
+        local learn = THCRollFlow.NewRecord()
+        learn.slots[THCRollFlow.slotLead] = Seat(oldSlots[NEGConstants.slotLearn])
+        Taken(learn, oldRolls[NEGConstants.slotLearn])
+
+        target.argument = argument
+        target.learn = learn
+        target.slots = {}
+        target.rolls = {}
+        target.resolution = nil
+        target.assistTier = 0
+        target.assistPending = nil
+    end)
+
+    printf("NEG:: negotiation moved onto roll records")
 end
 
 --- Whether this client may move this hero. The Director may move anyone; a
@@ -1365,286 +1519,10 @@ function NEGRun.ParticipantName(live, charid)
     return ""
 end
 
---- Ask for the next roll this track needs. On an argument the assist goes
---- first, because what it earns rides on the lead's roll.
---- @param track string
-function NEGRun.TriggerRoll(track)
-    local live = NEGRun.Active()
-    if live == nil then
-        printf("NEG:: TriggerRoll(%s) refused - no live negotiation", tostring(track))
-        return
-    end
-
-    --A resolution outlives its request, and lives in the shared document, so a
-    --stale one survives reloads. Refusing on its mere presence makes every
-    --later roll a silent no-op; check whether it is still live first.
-    local res = live:try_get("resolution")
-    if res ~= nil then
-        local req = res.actionId ~= nil
-            and dmhub.GetPlayerActionRequest(res.actionId) or nil
-        local info = req ~= nil and req.info.tokens[res.actionFor] or nil
-        local status = info ~= nil and info.status or nil
-
-        if req == nil or status == "cancel" or status == "complete" then
-            printf("NEG:: TriggerRoll(%s) clearing stale resolution slot=%s status=%s",
-                tostring(track), tostring(res.slot), tostring(status))
-            NEGRun.Mutate("Clear stale negotiation roll", function(data)
-                if data.live ~= nil then
-                    data.live.resolution = nil
-                end
-            end)
-            live = NEGRun.Active()
-        else
-            printf("NEG:: TriggerRoll(%s) refused - roll still out on track=%s slot=%s",
-                tostring(track), tostring(res.track), tostring(res.slot))
-            return
-        end
-    end
-
-    local slot = NEGConstants.slotLearn
-    local grant, grantFrom = nil, nil
-
-    if track == NEGConstants.trackArgument then
-        local assist = NEGRun.Slot(live, NEGConstants.slotAssist)
-        if assist ~= nil and live:try_get("assistTier", 0) == 0 then
-            slot = NEGConstants.slotAssist
-        else
-            slot = NEGConstants.slotLead
-            local tier = live:try_get("assistTier", 0)
-            if assist ~= nil and tier > 0 then
-                grant = NEGRun.AssistGrant(tier)
-                grantFrom = NEGRun.ParticipantName(live, assist.charid)
-            end
-        end
-    end
-
-    local entry = NEGRun.Slot(live, slot)
-    if entry == nil then
-        printf("NEG:: TriggerRoll(%s) refused - nothing standing in slot %s",
-            tostring(track), tostring(slot))
-        return
-    end
-
-    --A request for an off-map character goes out and is never answered.
-    if not NEGRun.CanBePrompted(entry.charid) then
-        printf("NEG:: TriggerRoll(%s) refused - %s is not on the map, so cannot be prompted",
-            tostring(track), tostring(NEGRun.ParticipantName(live, entry.charid)))
-        gui.ModalMessage{
-            title = "Not on the map",
-            message = string.format(
-                "%s is not on the current map, and the roll prompt cannot reach a character who is not. Place them on the map and try again.",
-                NEGRun.ParticipantName(live, entry.charid)),
-        }
-        return
-    end
-
-    local actionId = SendRequest(live, slot, track, grant, grantFrom)
-    if actionId == nil then
-        printf("NEG:: TriggerRoll(%s) SendActionRequest returned nil for slot=%s charid=%s",
-            tostring(track), tostring(slot), tostring(entry.charid))
-        return
-    end
-
-    printf("NEG:: TriggerRoll(%s) sent slot=%s charid=%s actionId=%s",
-        tostring(track), tostring(slot), tostring(entry.charid), tostring(actionId))
-
-    NEGRun.Mutate("Request negotiation roll", function(data)
-        if data.live ~= nil then
-            data.live.resolution = {
-                slot = slot,
-                track = track,
-                actionId = actionId,
-                actionFor = entry.charid,
-            }
-        end
-    end)
-end
-
---- Drop an outstanding request and take the track out of resolution.
-function NEGRun.CancelRoll()
-    local live = NEGRun.Active()
-    local res = live ~= nil and live:try_get("resolution") or nil
-    --Dropped before the request goes, so the dialog's dying `result = false`
-    --is never read back against a request that no longer exists.
-    THCRoll.Cancel(res ~= nil and res.actionId or nil)
-
-    NEGRun.Mutate("Cancel negotiation roll", function(data)
-        if data.live ~= nil then
-            data.live.resolution = nil
-        end
-    end)
-end
-
---- Move a finished roll onto the negotiation. Stateless and idempotent: every
---- input is cloud state, so a reload picks up wherever the document says it is.
-function NEGRun.PumpRolls()
-    if not dmhub.isDM then
-        return
-    end
-
-    local live = NEGRun.Active()
-    if live == nil or live:try_get("status") ~= NEGConstants.statusRunning then
-        return
-    end
-
-    local res = live:try_get("resolution")
-    if res == nil or res.actionId == nil then
-        return
-    end
-
-    --- Forget the request without recording anything against it.
-    local function Abandon()
-        NEGRun.Mutate("Clear negotiation roll", function(data)
-            if data.live ~= nil then
-                data.live.resolution = nil
-            end
-        end)
-    end
-
-    local status, rollInfo = THCRoll.Harvest(res.actionId, res.actionFor)
-
-    --A player who dismissed their own roll takes the request down with them,
-    --which closes the summary dialog too.
-    if status == "cancelled" then
-        NEGRun.CancelRoll()
-        return
-    end
-
-    --With a summary dialog up, the Director's Proceed is what accepts the
-    --roll: a completed roll sits unrecorded so Re-roll and Take Roll still
-    --have a live request to act on, and so a roll about to be thrown away has
-    --not already moved the scales.
-    if status == "waiting" then
-        return
-    end
-
-    if status ~= "complete" then
-        Abandon()
-        return
-    end
-
-    local tier = rollInfo.tier
-
-    local wasAssist = res.slot == NEGConstants.slotAssist
-    local track = res.track
-    local entry = NEGRun.Slot(live, res.slot)
-
-    --Read once here and stored, so both windows show the same sentence.
-    local outcome = nil
-    if not wasAssist then
-        if track == NEGConstants.trackLearn then
-            outcome = NEGRules.LearnOutcome(tier)
-        else
-            outcome = NEGRules.ArgumentOutcome(tier,
-                live:try_get("appealMotivation", false), rollInfo.naturalRoll)
-        end
-    end
-
-    local record = {
-        tier = tier,
-        total = rollInfo.total,
-        naturalRoll = rollInfo.naturalRoll,
-        boons = rollInfo.boons,
-        banes = rollInfo.banes,
-        charid = res.actionFor,
-        attrId = entry ~= nil and entry.attrId or "",
-        skillId = entry ~= nil and entry.skillId or "",
-        outcomeText = outcome ~= nil and outcome.text or nil,
-        interestDelta = outcome ~= nil and outcome.interest or 0,
-        patienceDelta = outcome ~= nil and outcome.patience or 0,
-    }
-
-    NEGRun.Mutate("Record negotiation roll", function(data)
-        local target = data.live
-        if target == nil then
-            return
-        end
-        target.resolution = nil
-
-        local rolls = {}
-        for key, value in pairs(target.rolls) do
-            rolls[key] = value
-        end
-        rolls[res.slot] = record
-        target.rolls = rolls
-
-        if wasAssist then
-            target.assistTier = tier
-        end
-
-        --The ladder is unambiguous once the appeal is known. The scales stay
-        --clickable for what the rules leave to judgment: a caught lie, a
-        --well-roleplayed argument taken as a tier 3.
-        if outcome ~= nil then
-            if outcome.interest ~= 0 then
-                target.interest = NEGConstants.Clamp(
-                    target.interest + outcome.interest,
-                    NEGConstants.scaleMin, target:InterestMax())
-
-                --Interest moved, so the offer moved with it.
-                target.offerShared = false
-            end
-
-            if outcome.patience ~= 0 then
-                target.patience = NEGConstants.Clamp(
-                    target.patience + outcome.patience,
-                    NEGConstants.scaleMin, NEGConstants.scaleMax)
-            end
-        end
-
-        --The assist folds into the lead's entry rather than becoming its own,
-        --so "led 2, assisted 1" counts without counting the argument twice.
-        if wasAssist then
-            target.assistPending = res.actionFor
-        else
-            local assistCharid = target:try_get("assistPending")
-            AppendHistory(target, {
-                kind = cond(track == NEGConstants.trackLearn, "read", "argument"),
-                tier = tier,
-                motivation = target.appealMotivation == true,
-                lead = cond(track == NEGConstants.trackLearn, nil, res.actionFor),
-                reader = cond(track == NEGConstants.trackLearn, res.actionFor, nil),
-                assist = assistCharid,
-                interestDelta = outcome ~= nil and outcome.interest or 0,
-                patienceDelta = outcome ~= nil and outcome.patience or 0,
-            })
-            target.assistPending = nil
-        end
-    end)
-
-    if outcome ~= nil then
-        printf("NEG:: roll applied track=%s tier=%d interest%+d patience%+d - %s",
-            tostring(track), tier, outcome.interest, outcome.patience, outcome.text)
-    end
-
-    --The assist only ever set up the lead's roll, so it rolls straight on.
-    if wasAssist then
-        NEGRun.TriggerRoll(track)
-    end
-end
-
---- Ticked rather than driven from the panel: closing the window destroys the
---- panel, and the harvest has to survive that.
-local function Tick()
-    if mod.unloaded then
-        return
-    end
-    if dmhub.isDM then
-        NEGRun.PumpRolls()
-    end
-    dmhub.Schedule(0.5, Tick)
-end
-
-dmhub.Schedule(0.5, Tick)
-
 --- Discard the whole run and go back to the library. Cancels any outstanding
 --- request, so nothing survives to block the next negotiation.
 function NEGRun.Clear()
-    local live = NEGRun.Active()
-    local res = live ~= nil and live:try_get("resolution") or nil
-    if res ~= nil and res.actionId ~= nil then
-        THCRoll.Cancel(res.actionId)
-    end
+    NEGRun.AbandonRolls()
 
     NEGRun.Mutate("Clear negotiation", function(data)
         data.live = nil
