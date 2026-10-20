@@ -343,10 +343,9 @@ function NEGDialog.Create()
         height = NEGConstants.windowHeight,
         footerCells = { 100 },
         close = "host",
-        styles = THCRollWidgets.tierStyles,
 
-        --The rolls are read back here, so a roll that lands while the window
-        --is shut waits for it to open again; nothing is lost.
+        --Rolls are read back by THCRollFlow's harvest whether this window is
+        --open or not; opening it catches up.
         monitor = NEGRun.DocPath(),
         refresh = function(shell)
             NEGRun.MigrateLive()
@@ -388,12 +387,6 @@ function NEGDialog.Create()
         },
 
         rightPane,
-
-        --Roll requests change far more often than the negotiation does, so
-        --they get a watcher of their own rather than rebuilding the board.
-        THCWidgets.Watch("/actionRequests", function()
-            NEGRun.Pump()
-        end),
     })
 
     dlg:SetFooterContent("left", footerPanel)
@@ -436,7 +429,6 @@ function NEGDialog.CreatePlayerView()
         height = NEGConstants.playerWindowHeight,
         footerCells = false,
         close = "host",
-        styles = THCRollWidgets.tierStyles,
 
         monitor = NEGRun.DocPath(),
         refresh = function(shell)

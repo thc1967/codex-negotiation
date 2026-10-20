@@ -1277,37 +1277,6 @@ function NEGRun.Outcome(live, track)
         live:try_get("appealMotivation", false), roll.naturalRoll)
 end
 
---- The tier table one viewer sees for a track. While the Assist is up it
---- shows the Assist's outcomes, which give nothing away; then the Lead's. A
---- read's outcomes give nothing away either; an argument's are read against
---- this NPC's motivations, so they are the Director's unless the negotiation
---- is open. The tier itself is no secret: the table sees the roll.
---- @param live NEGLive
---- @param track string
---- @param director boolean
---- @return {labels: string[]|nil, landed: number|nil, slot: string}
-function NEGRun.TierTable(live, track, director)
-    local record = NEGRun.Record(live, track)
-    local slot = NEGRun.Flow(track):TableSlot()
-    local landed = THCRollFlow.LandedRow(record.rolls[slot], false)
-
-    if slot == THCRollFlow.slotAssist then
-        return { labels = THCRollFlow.AssistTierText(), landed = landed, slot = slot }
-    end
-
-    local labels = nil
-    if track == NEGConstants.trackLearn then
-        labels = {}
-        for tier = 1, 3 do
-            labels[tier] = NEGRules.LearnOutcome(tier).text
-        end
-    elseif director or live:try_get("open", false) then
-        labels = NEGRules.TierText(track, live:try_get("appealMotivation", false))
-    end
-
-    return { labels = labels, landed = landed, slot = slot }
-end
-
 --- Send whichever roll this track needs next. Director only.
 --- @param track string
 function NEGRun.Roll(track)
@@ -1339,6 +1308,11 @@ function NEGRun.Pump()
     NEGRun.Flow(NEGConstants.trackArgument):Pump()
     NEGRun.Flow(NEGConstants.trackLearn):Pump()
 end
+
+--Harvested whether or not the window is open.
+THCRollFlow.RegisterHarvester("negotiation", function()
+    NEGRun.Pump()
+end)
 
 --- The Director takes the Lead's roll: the scales move, the history records
 --- it, and the track can no longer roll or re-roll. Once only, however often

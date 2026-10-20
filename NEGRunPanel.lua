@@ -407,7 +407,7 @@ end
 --- THCRollFlow's; what stays here is Negotiation's own furniture - Renown,
 --- the appeal, the hidden Assist, the curtains.
 --- @param live NEGLive
---- @param args {track: string, title: string, width: string, director: boolean, slots: {key: string, label: string}[], landed: table}
+--- @param args {track: string, title: string, width: string, director: boolean, slots: {key: string, label: string}[]}
 --- @return Panel
 local function TrackPanel(live, args)
     local track = args.track
@@ -738,26 +738,6 @@ local function TrackPanel(live, args)
         children = units,
     }
 
-    --The outcomes of whoever is up, the row the roll lands on lit. The track is
-    --rebuilt on every change, so the board remembers what it last showed -
-    --whose table and which row - and the table pulses only when that moves.
-    local tiers = NEGRun.TierTable(live, track, args.director)
-    local shown = string.format("%s:%s", tiers.slot, tostring(tiers.landed))
-    local previous = args.landed[track]
-    tiers.pulse = previous ~= nil and previous ~= shown and tiers.landed ~= nil
-    args.landed[track] = shown
-
-    local tierTable = THCRollWidgets.TierTable()
-    tierTable:FireEvent("setTiers", tiers)
-    children[#children + 1] = gui.Panel{
-        width = "98%",
-        height = "auto",
-        halign = "left",
-        valign = "top",
-        tmargin = 6,
-        tierTable,
-    }
-
     --Appended last, which is what puts it on top. A spent read is barred on
     --both sides, so both get that curtain. A roll still out curtains only the
     --table: covering the Director's would take away the die that recalls it.
@@ -793,11 +773,6 @@ end
 --- @return {body: Panel}
 function NEGRunPanel.Create(args)
     local director = args.director == true
-
-    --The row each track's tier table last lit, false for none. The tracks are
-    --rebuilt on every change, so this is what tells a result arriving from one
-    --already there.
-    local m_landed = {}
 
     local impressionLabel = FieldValue()
 
@@ -1378,7 +1353,6 @@ function NEGRunPanel.Create(args)
                     title = "Make Argument",
                     width = NEGConstants.trackArgumentWidth,
                     director = director,
-                    landed = m_landed,
                     slots = {
                         { key = THCRollFlow.slotLead, label = "Lead" },
                         { key = THCRollFlow.slotAssist, label = "Assist" },
@@ -1390,7 +1364,6 @@ function NEGRunPanel.Create(args)
                     title = "Learn Motivation / Pitfall",
                     width = NEGConstants.trackLearnWidth,
                     director = director,
-                    landed = m_landed,
                     slots = {
                         { key = THCRollFlow.slotLead, label = "Reader" },
                     },
