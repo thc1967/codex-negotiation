@@ -1277,17 +1277,23 @@ function NEGRun.Outcome(live, track)
         live:try_get("appealMotivation", false), roll.naturalRoll)
 end
 
---- The tier table one viewer sees for a track. A read's outcomes give nothing
---- away; an argument's are read against this NPC's motivations, so they are
---- the Director's unless the negotiation is open. The tier itself is no
---- secret: the table sees the roll.
+--- The tier table one viewer sees for a track. While the Assist is up it
+--- shows the Assist's outcomes, which give nothing away; then the Lead's. A
+--- read's outcomes give nothing away either; an argument's are read against
+--- this NPC's motivations, so they are the Director's unless the negotiation
+--- is open. The tier itself is no secret: the table sees the roll.
 --- @param live NEGLive
 --- @param track string
 --- @param director boolean
---- @return {labels: string[]|nil, landed: number|nil}
+--- @return {labels: string[]|nil, landed: number|nil, slot: string}
 function NEGRun.TierTable(live, track, director)
-    local roll = NEGRun.Record(live, track).rolls[THCRollFlow.slotLead]
-    local landed = THCRollFlow.LandedRow(roll, false)
+    local record = NEGRun.Record(live, track)
+    local slot = NEGRun.Flow(track):TableSlot()
+    local landed = THCRollFlow.LandedRow(record.rolls[slot], false)
+
+    if slot == THCRollFlow.slotAssist then
+        return { labels = THCRollFlow.AssistTierText(), landed = landed, slot = slot }
+    end
 
     local labels = nil
     if track == NEGConstants.trackLearn then
@@ -1299,7 +1305,7 @@ function NEGRun.TierTable(live, track, director)
         labels = NEGRules.TierText(track, live:try_get("appealMotivation", false))
     end
 
-    return { labels = labels, landed = landed }
+    return { labels = labels, landed = landed, slot = slot }
 end
 
 --- Send whichever roll this track needs next. Director only.

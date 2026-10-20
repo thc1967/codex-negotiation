@@ -738,13 +738,14 @@ local function TrackPanel(live, args)
         children = units,
     }
 
-    --The Lead's outcomes, the row the roll lands on lit. The track is rebuilt
-    --on every change, so the board remembers what it last showed and the
-    --table pulses only when that moves.
+    --The outcomes of whoever is up, the row the roll lands on lit. The track is
+    --rebuilt on every change, so the board remembers what it last showed -
+    --whose table and which row - and the table pulses only when that moves.
     local tiers = NEGRun.TierTable(live, track, args.director)
+    local shown = string.format("%s:%s", tiers.slot, tostring(tiers.landed))
     local previous = args.landed[track]
-    tiers.pulse = previous ~= nil and previous ~= (tiers.landed or false) and tiers.landed ~= nil
-    args.landed[track] = tiers.landed or false
+    tiers.pulse = previous ~= nil and previous ~= shown and tiers.landed ~= nil
+    args.landed[track] = shown
 
     local tierTable = THCRollWidgets.TierTable()
     tierTable:FireEvent("setTiers", tiers)
