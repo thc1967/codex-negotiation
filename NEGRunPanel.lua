@@ -402,31 +402,6 @@ function NEGRunPanel.CreateSetup()
     }
 end
 
---- A small text button for the track header's next step.
---- @param text string
---- @param enabled boolean
---- @param tooltip string|nil
---- @param click fun()
---- @return Panel
-local function StepButton(text, enabled, tooltip, click)
-    return gui.Button{
-        classes = { "sizeXs", cond(enabled, nil, "disabled") },
-        width = "auto",
-        height = 22,
-        halign = "right",
-        valign = "center",
-        lmargin = 6,
-        text = text,
-        interactable = enabled,
-        hover = tooltip ~= nil and THCWidgets.Tooltip(tooltip) or nil,
-        click = function(element)
-            if element.interactable then
-                click()
-            end
-        end,
-    }
-end
-
 --- One track: its seats, their picks and rolls, the Director's next step, and
 --- the tier table the Lead's roll lands on. The rolls themselves are
 --- THCRollFlow's; what stays here is Negotiation's own furniture - Renown,
@@ -530,39 +505,31 @@ local function TrackPanel(live, args)
         }
     end
 
-    --The step after a roll: the Lead's turn once the Assist is in, then the
-    --Director taking the Lead's roll.
-    local stepButton = nil
+    --The step after a roll sits on the seat that rolled, beside its Re-roll:
+    --the Lead's turn once the Assist is in, then the Director taking the
+    --Lead's roll.
+    local steps = {}
     if args.director and not rolling and not accepted then
         if leadRoll ~= nil then
-            stepButton = StepButton("Accept", true,
-                "Take this roll: the scales move and the track can no longer re-roll.",
-                function()
+            steps[THCRollFlow.slotLead] = {
+                text = "Accept",
+                enabled = true,
+                tooltip = "Take this roll: the scales move and the track can no longer re-roll.",
+                run = function()
                     NEGRun.AcceptTrack(track)
-                end)
+                end,
+            }
         elseif assistRoll ~= nil then
             local blocker = cond(flow:CanRoll(), flow:SendBlocker(), "This track cannot roll now.")
-            stepButton = StepButton("Continue", blocker == nil, blocker or "Ask the Lead to roll.",
-                function()
+            steps[THCRollFlow.slotAssist] = {
+                text = "Continue",
+                enabled = blocker == nil,
+                tooltip = blocker or "Ask the Lead to roll.",
+                run = function()
                     NEGRun.Roll(track)
-                end)
+                end,
+            }
         end
-    end
-
-    local header = {
-        dieButton,
-
-        gui.Label{
-            classes = { "sizeL" },
-            width = cond(stepButton ~= nil, "100%-120", "100%-30"),
-            height = "100%",
-            halign = "left",
-            valign = "center",
-            text = args.title,
-        },
-    }
-    if stepButton ~= nil then
-        header[#header + 1] = stepButton
     end
 
     --Fixed height, and the label sized in pixels. An auto-height label taking
@@ -575,7 +542,17 @@ local function TrackPanel(live, args)
             halign = "left",
             valign = "top",
             bmargin = 2,
-            children = header,
+
+            dieButton,
+
+            gui.Label{
+                classes = { "sizeL" },
+                width = "100%-30",
+                height = "100%",
+                halign = "left",
+                valign = "center",
+                text = args.title,
+            },
         },
     }
 
@@ -710,7 +687,7 @@ local function TrackPanel(live, args)
             column[#column + 1] = offline
 
             local buttons = THCRollWidgets.DirectorButtons()
-            buttons:FireEvent("setButtons", flow, slotKey)
+            buttons:FireEvent("setButtons", flow, slotKey, steps[slotKey])
             column[#column + 1] = buttons
         end
 
