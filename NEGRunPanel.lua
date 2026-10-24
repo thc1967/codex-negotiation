@@ -1006,69 +1006,19 @@ function NEGRunPanel.Create(args)
 
         --The rulebook's twelve traits, read in the portrait's frame. All of
         --them, whatever has been revealed: it is the rules, not the NPC.
-        local referenceRows = {}
+        local entries = {}
         for _, trait in ipairs(NEGRules.traits) do
-            local lines = {
-                gui.Label{
-                    classes = { "sizeM" },
-                    width = "100%",
-                    height = "auto",
-                    halign = "left",
-                    valign = "top",
-                    text = trait.text,
-                },
-                gui.Label{
-                    classes = { "sizeXs", "noBold" },
-                    width = "100%",
-                    height = "auto",
-                    halign = "left",
-                    valign = "top",
-                    tmargin = 6,
-                    textWrap = true,
-                    markdown = true,
-                    text = "**Motivation:** " .. trait.motivation,
-                },
-                gui.Label{
-                    classes = { "sizeXs", "noBold" },
-                    width = "100%",
-                    height = "auto",
-                    halign = "left",
-                    valign = "top",
-                    tmargin = 6,
-                    textWrap = true,
-                    markdown = true,
-                    text = "**Pitfall:** " .. trait.pitfall,
-                },
+            local parts = {
+                "### " .. trait.text,
+                "**Motivation:** " .. trait.motivation,
+                "**Pitfall:** " .. trait.pitfall,
             }
-            --One label per bullet, so the examples get room between them.
-            for index, example in ipairs(trait.examples) do
-                lines[#lines + 1] = gui.Label{
-                    classes = { "sizeXs", "noBold", "fgMuted" },
-                    width = "100%",
-                    height = "auto",
-                    halign = "left",
-                    valign = "top",
-                    tmargin = cond(index == 1, 8, 5),
-                    textWrap = true,
-                    markdown = true,
-                    text = "* " .. example,
-                }
+            local bullets = {}
+            for _, example in ipairs(trait.examples) do
+                bullets[#bullets + 1] = "* <color=@fgMuted>" .. example .. "</color>"
             end
-            if #referenceRows > 0 then
-                referenceRows[#referenceRows + 1] = gui.MCDMDivider{
-                    width = "100%",
-                    halign = "left",
-                    vmargin = 22,
-                }
-            end
-            referenceRows[#referenceRows + 1] = gui.Panel{
-                width = "100%",
-                height = "auto",
-                flow = "vertical",
-                halign = "left",
-                valign = "top",
-                children = lines,
-            }
+            parts[#parts + 1] = table.concat(bullets, "\n")
+            entries[#entries + 1] = table.concat(parts, "\n\n")
         end
 
         local reference = gui.Panel{
@@ -1079,14 +1029,16 @@ function NEGRunPanel.Create(args)
             valign = "top",
             vscroll = true,
 
-            gui.Panel{
+            gui.Label{
+                classes = { "sizeXs", "noBold" },
                 width = "100%-16",
                 height = "auto",
-                flow = "vertical",
                 halign = "center",
                 valign = "top",
                 vmargin = 8,
-                children = referenceRows,
+                textWrap = true,
+                markdown = true,
+                text = ThemeEngine.ResolveTokens(table.concat(entries, "\n\n---\n\n")),
             },
         }
 
