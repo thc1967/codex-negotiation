@@ -1023,7 +1023,7 @@ function NEGRunPanel.Create(args)
                     height = "auto",
                     halign = "left",
                     valign = "top",
-                    tmargin = 2,
+                    tmargin = 6,
                     textWrap = true,
                     markdown = true,
                     text = "**Motivation:** " .. trait.motivation,
@@ -1034,28 +1034,31 @@ function NEGRunPanel.Create(args)
                     height = "auto",
                     halign = "left",
                     valign = "top",
-                    tmargin = 2,
+                    tmargin = 6,
                     textWrap = true,
                     markdown = true,
                     text = "**Pitfall:** " .. trait.pitfall,
                 },
-                gui.Label{
+            }
+            --One label per bullet, so the examples get room between them.
+            for index, example in ipairs(trait.examples) do
+                lines[#lines + 1] = gui.Label{
                     classes = { "sizeXs", "noBold", "fgMuted" },
                     width = "100%",
                     height = "auto",
                     halign = "left",
                     valign = "top",
-                    tmargin = 3,
+                    tmargin = cond(index == 1, 8, 5),
                     textWrap = true,
                     markdown = true,
-                    text = "* " .. table.concat(trait.examples, "\n* "),
-                },
-            }
+                    text = "* " .. example,
+                }
+            end
             if #referenceRows > 0 then
                 referenceRows[#referenceRows + 1] = gui.MCDMDivider{
                     width = "100%",
                     halign = "left",
-                    vmargin = 8,
+                    vmargin = 14,
                 }
             end
             referenceRows[#referenceRows + 1] = gui.Panel{
@@ -1092,8 +1095,18 @@ function NEGRunPanel.Create(args)
         local m_hasPortrait = false
         local referenceButton
 
+        --Pure white on art; the lit glyph is a second panel so its class never fights an inline colour.
         local referenceIcon = gui.Panel{
-            classes = { "bgFg" },
+            interactable = false,
+            width = "70%",
+            height = "70%",
+            halign = "center",
+            valign = "center",
+            bgimage = NEGConstants.iconReference,
+            bgcolor = "white",
+        }
+        local referenceIconLit = gui.Panel{
+            classes = { "bgSuccess", "collapsed" },
             interactable = false,
             width = "70%",
             height = "70%",
@@ -1109,8 +1122,8 @@ function NEGRunPanel.Create(args)
             portrait:SetClass("collapsed", showReference)
             reference:SetClass("collapsed", not showReference)
             referenceButton:SetClass("collapsed", not m_hasPortrait)
-            referenceIcon:SetClass("bgSuccess", m_showReference)
-            referenceIcon:SetClass("bgFg", not m_showReference)
+            referenceIcon:SetClass("collapsed", m_showReference)
+            referenceIconLit:SetClass("collapsed", not m_showReference)
         end
 
         --- @param portraitid string
@@ -1122,8 +1135,7 @@ function NEGRunPanel.Create(args)
             ApplyFrame()
         end
 
-        --A dark disc under the glyph keeps it legible over any portrait; the
-        --scrim is black in every theme because it sits on art, not on a surface.
+        --A dark disc keeps the glyph legible over any portrait, black in every theme because it sits on art.
         referenceButton = gui.Panel{
             classes = { "collapsed" },
             floating = true,
@@ -1143,6 +1155,7 @@ function NEGRunPanel.Create(args)
             end,
 
             referenceIcon,
+            referenceIconLit,
         }
 
         portraitColumn = gui.Panel{
