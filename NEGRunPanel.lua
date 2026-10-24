@@ -1058,7 +1058,7 @@ function NEGRunPanel.Create(args)
                 referenceRows[#referenceRows + 1] = gui.MCDMDivider{
                     width = "100%",
                     halign = "left",
-                    vmargin = 14,
+                    vmargin = 22,
                 }
             end
             referenceRows[#referenceRows + 1] = gui.Panel{
