@@ -1038,7 +1038,7 @@ function NEGRunPanel.Create(args)
                 vmargin = 8,
                 textWrap = true,
                 markdown = true,
-                text = ThemeEngine.ResolveTokens(table.concat(entries, "\n\n---\n\n")),
+                text = ThemeEngine.ResolveTokens(table.concat(entries, "\n\n")),
             },
         }
 
