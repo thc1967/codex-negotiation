@@ -1039,17 +1039,23 @@ function NEGRunPanel.Create(args)
                     markdown = true,
                     text = "**Pitfall:** " .. trait.pitfall,
                 },
-            }
-            for _, example in ipairs(trait.examples) do
-                lines[#lines + 1] = gui.Label{
+                gui.Label{
                     classes = { "sizeXs", "noBold", "fgMuted" },
-                    width = "100%-10",
+                    width = "100%",
                     height = "auto",
-                    halign = "right",
+                    halign = "left",
                     valign = "top",
                     tmargin = 3,
                     textWrap = true,
-                    text = example,
+                    markdown = true,
+                    text = "* " .. table.concat(trait.examples, "\n* "),
+                },
+            }
+            if #referenceRows > 0 then
+                referenceRows[#referenceRows + 1] = gui.MCDMDivider{
+                    width = "100%",
+                    halign = "left",
+                    vmargin = 8,
                 }
             end
             referenceRows[#referenceRows + 1] = gui.Panel{
@@ -1058,7 +1064,6 @@ function NEGRunPanel.Create(args)
                 flow = "vertical",
                 halign = "left",
                 valign = "top",
-                bmargin = 10,
                 children = lines,
             }
         end
@@ -1077,7 +1082,7 @@ function NEGRunPanel.Create(args)
                 flow = "vertical",
                 halign = "center",
                 valign = "top",
-                tmargin = 8,
+                vmargin = 8,
                 children = referenceRows,
             },
         }
@@ -1087,6 +1092,16 @@ function NEGRunPanel.Create(args)
         local m_hasPortrait = false
         local referenceButton
 
+        local referenceIcon = gui.Panel{
+            classes = { "bgFg" },
+            interactable = false,
+            width = "70%",
+            height = "70%",
+            halign = "center",
+            valign = "center",
+            bgimage = NEGConstants.iconReference,
+        }
+
         --- The NPC or the reference in the frame. With no portrait there is
         --- nothing to swap back to, so the reference stays and the button goes.
         local function ApplyFrame()
@@ -1094,8 +1109,8 @@ function NEGRunPanel.Create(args)
             portrait:SetClass("collapsed", showReference)
             reference:SetClass("collapsed", not showReference)
             referenceButton:SetClass("collapsed", not m_hasPortrait)
-            referenceButton:SetClass("bgSuccess", m_showReference)
-            referenceButton:SetClass("bgFg", not m_showReference)
+            referenceIcon:SetClass("bgSuccess", m_showReference)
+            referenceIcon:SetClass("bgFg", not m_showReference)
         end
 
         --- @param portraitid string
@@ -1107,8 +1122,10 @@ function NEGRunPanel.Create(args)
             ApplyFrame()
         end
 
+        --A dark disc under the glyph keeps it legible over any portrait; the
+        --scrim is black in every theme because it sits on art, not on a surface.
         referenceButton = gui.Panel{
-            classes = { "bgFg", "collapsed" },
+            classes = { "collapsed" },
             floating = true,
             width = NEGConstants.referenceButtonSize,
             height = NEGConstants.referenceButtonSize,
@@ -1116,12 +1133,16 @@ function NEGRunPanel.Create(args)
             valign = "top",
             hmargin = 6,
             vmargin = 6,
-            bgimage = NEGConstants.iconReference,
+            bgimage = true,
+            bgcolor = NEGConstants.referenceScrim,
+            cornerRadius = NEGConstants.referenceButtonSize / 2,
             hover = THCWidgets.Tooltip("Motivations and pitfalls"),
             press = function()
                 m_showReference = not m_showReference
                 ApplyFrame()
             end,
+
+            referenceIcon,
         }
 
         portraitColumn = gui.Panel{
