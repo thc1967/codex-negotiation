@@ -123,6 +123,11 @@ NEGConstants.iconMotivation = "phosphor/hand-heart-light.png"
 --- Whether the lead is leaning on their Renown, which buys them an edge.
 NEGConstants.iconRenown = "phosphor/crown-cross-light.png"
 
+--- On the player's portrait: swaps the NPC for the motivations and pitfalls
+--- reference in the same frame.
+NEGConstants.iconReference = "phosphor/question.png"
+NEGConstants.referenceButtonSize = 28
+
 --- What a scale wears when the Director has not opened it. The bubbles stay,
 --- so the table can see there IS a scale and how long it is - they just do not
 --- get to read it.

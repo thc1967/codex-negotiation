@@ -8,19 +8,129 @@ NEGRules = RegisterGameType("NEGRules")
 --- The twelve traits, in the order the rulebook lists them. The same list
 --- serves motivations and pitfalls: what motivates one NPC is a pitfall for
 --- another, so a trait is one or the other for a given NPC, never both.
+--- `motivation` and `pitfall` sum up the rulebook's prose for each side, and
+--- `examples` are its example arguments that appeal to the motivation.
 NEGRules.traits = {
-    { id = "benevolence", text = "Benevolence" },
-    { id = "discovery", text = "Discovery" },
-    { id = "freedom", text = "Freedom" },
-    { id = "greed", text = "Greed" },
-    { id = "higherauthority", text = "Higher Authority" },
-    { id = "justice", text = "Justice" },
-    { id = "legacy", text = "Legacy" },
-    { id = "peace", text = "Peace" },
-    { id = "power", text = "Power" },
-    { id = "protection", text = "Protection" },
-    { id = "revelry", text = "Revelry" },
-    { id = "vengeance", text = "Vengeance" },
+    {
+        id = "benevolence",
+        text = "Benevolence",
+        motivation = "Believes in sharing what they have with others, though their generosity may be limited to a chosen group or by scarce means.",
+        pitfall = "Cynically believes no one is owed anything, and laughs off helping others just because it's right.",
+        examples = {
+            "“If you lend us the Sword of Agathor, we can make Capital safer for your guild by using it to lay your enemies low.”",
+            "“If you can teleport us into the dragon’s cave, we’ll give you half the wyrm’s hoard once we cut off the creature’s head. That could benefit generations of students at your academy!”",
+        },
+    },
+    {
+        id = "discovery",
+        text = "Discovery",
+        motivation = "Wants to learn new lore, explore forgotten places, or uncover lost artifacts, whether for a specific goal or pure curiosity.",
+        pitfall = "Has no interest in new places, peoples, or ideas, out of fear of the unknown or a past discovery gone wrong.",
+        examples = {
+            "“Allow us to use your cipher to translate the only copy of the Codex Mortis, and then we’ll let you read the book when we’re done.”",
+            "“We know the journey to Decant Isle is dangerous, but we’re going into uncharted territory. We thought that your crew of sailors might want to be among the few mortals to lay eyes on the place.”",
+        },
+    },
+    {
+        id = "freedom",
+        text = "Freedom",
+        motivation = "Wants no authority above them and none over others, whether keeping their own liberty or freeing others.",
+        pitfall = "Sees a world without authority as chaos, and may believe they themself should rule.",
+        examples = {
+            "“I know you want to have the queen’s authority revoked forever. She has no heirs. Give us the key to her study so that we can prove her corruption and give you a chance to topple the monarchy henceforth.”",
+            "“If you promise to give us ten vials of Assassin’s Kiss, we’ll see to it that the baron’s prison is emptied.”",
+        },
+    },
+    {
+        id = "greed",
+        text = "Greed",
+        motivation = "Desires wealth and resources (coin, souls, or something stranger) above almost anything else.",
+        pitfall = "Has no interest in accumulating wealth and is offended by any attempt to buy their help.",
+        examples = {
+            "“You should help us battle the overmind. Xorranox’s wealth is legendary, and we’ll see to it that you get your fair share.”",
+            "“Give us a week to do research among your private collection of books, and we’ll give you another ten unique tomes we found in an ancient star elf sanctuary.”",
+        },
+    },
+    {
+        id = "higherauthority",
+        text = "Higher Authority",
+        motivation = "Stays staunchly loyal to a person, deity, organization, or force they see as more important than themself.",
+        pitfall = "Scoffs at serving anyone and believes they personally answer to no one.",
+        examples = {
+            "“All great creations honor your god, Malus. If you teach me to forge the Hammer of Azdul, that will be a great honor to bestow upon your god.”",
+            "“You know what Jarith the Bold would do? He’d guide us through the vast wasteland of the desert to reach the tower. Will you be our Jarith?”",
+        },
+    },
+    {
+        id = "justice",
+        text = "Justice",
+        motivation = "Wants the righteous rewarded and the wicked punished, by their own (possibly harsh) sense of right and wrong.",
+        pitfall = "Believes the world is eternal conflict with no such thing as justice, and that anyone who thinks otherwise is a naive fool.",
+        examples = {
+            "“You despise those who steal from nature. Allow us peacefully into your wode so we may bottle the Blessed Spring’s water. We’re going to use it to stop an army from felling every tree and tearing up the earth wherever they go.”",
+            "“You think nobles are lazy barons who get rich off the backs of peasants. We want to dethrone Lord Saxton. Lend us your crew of thieves, and we’ll make sure that when Saxton falls, the people can choose their own leaders.”",
+        },
+    },
+    {
+        id = "legacy",
+        text = "Legacy",
+        motivation = "Wants fame in life and acclaim that outlasts death, for deeds great or terrible.",
+        pitfall = "Cares nothing for leaving a mark on the world and sees such vanity as a waste of time.",
+        examples = {
+            "“If you give us the vizier’s itinerary, I’ll compose a song about your bravery in defying him, then sing it in every tavern from here to Ix!”",
+            "“Yes, losing the battle is a possibility. If we do, the gnolls will still come for you eventually. But if we crush our foes, imagine the honors, the histories, the poems, the statues—all of it created for you because your siege engines turned the tide.”",
+        },
+    },
+    {
+        id = "peace",
+        text = "Peace",
+        motivation = "Wants calm, left alone to run their own slice of the world, whether finding that peace or keeping it.",
+        pitfall = "Hates being bored and craves excitement, drama, and danger over the status quo.",
+        examples = {
+            "“You have a good thing going here. A little burgling of nobles, some alcohol smuggling, and some illegal gambling dens. No one’s getting hurt, but Constable Cofax is closing in on you. We could redirect him toward some real danger to the community, if you can help us set a trap for the Watchmaker.”",
+            "“I know you don’t sell to outsiders, but we need that helm. I’m going to use it to turn back a group of hobgoblins marching this way. They’re not going to be as friendly as us.”",
+        },
+    },
+    {
+        id = "power",
+        text = "Power",
+        motivation = "Covets authority and influence, always seeking to grow and hold their domain however great it already is.",
+        pitfall = "Wants no authority for themself and rejects any suggestion that they rule over others.",
+        examples = {
+            "“Everyone knows you should be running the watch, Percy. The old lady’s retiring, and our friend Baron Kuglar is naming the replacement. Now, you let us into the restricted armory, and we’ll put in a good word.”",
+            "“We know he’s your brother, Your Highness, but he’s older—first in line for the throne. If you help us prove he’s in a cult, you become the favorite son.”",
+        },
+    },
+    {
+        id = "protection",
+        text = "Protection",
+        motivation = "Holds a duty to protect certain land, people, knowledge, items, or an organization at any cost.",
+        pitfall = "Leaves others to fend for themselves and may be disgusted at risking anything to protect them.",
+        examples = {
+            "“Dead soldiers grow the necromancer’s ranks. Total annihilation is the only way to defeat her. March with us now, while her army is small, and we’ll defeat her. Or you could gamble that someone else tries, fails, and suddenly she’s at the border, ready to overrun your kingdom with an army tenfold larger than what it is now.”",
+            "“I understand your grandchild is hell-bent on joining the service. I happen to have a magic suit of armor that could help them ward off the blows of monsters and ruffians. I’d be happy to give it to you, in exchange for borrowing your griffons for a few days. After all, I won’t need the armor if I can simply fly over the marsh’s monsters.”",
+        },
+    },
+    {
+        id = "revelry",
+        text = "Revelry",
+        motivation = "Just wants to have fun: parties, thrills, and indulgence with people they like.",
+        pitfall = "Sees socializing and hedonism as a waste of time, taking pleasure only in work and self-improvement.",
+        examples = {
+            "“How would you like to have the most exclusive songs for your exclusive birthday celebration next week? I’ll write you a whole original set list, free of charge … provided you extend me and my band here an invitation.”",
+            "“I know you don’t want to forge five Chronokinesis Crowns. How’s this instead? You do that for me, and I’ll give you the fourteen kegs of whiskey we found in a steel-dwarf ruin. This stuff is old, unique, and forget-your-first-name potent. You can crack a keg with your friends to celebrate a job well done.”",
+        },
+    },
+    {
+        id = "vengeance",
+        text = "Vengeance",
+        motivation = "Wants to harm someone who hurt them, whether in proportion, with interest, or through lesser pain like humiliation.",
+        pitfall = "Believes revenge solves nothing and takes a dim view of those who seek it.",
+        examples = {
+            "“The servants of Ajax killed your sister as she scoured the city for his cults. The Black Iron Pact works for the Overlord. Give us her diaries, and we might uncover the pact’s hideaway and deal a great blow to your hated foes.”",
+            "“That prankster Huckable made your trousers tear at the last council meeting. Don’t you want to pay him back? We can arrange a delicious prank at the next gathering, but we need you to guarantee the safety of the orc refugees.”",
+        },
+    },
 }
 
 --- @param id string

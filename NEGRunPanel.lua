@@ -982,6 +982,7 @@ function NEGRunPanel.Create(args)
     --not need it - the NPC is named in the header. Neither these nor the
     --ending pane exist on the Director's window, so neither is built for it.
     local portrait
+    local SetPortrait
     local portraitColumn
     local endingVerdict
     local endingOffer
@@ -1003,6 +1004,126 @@ function NEGRunPanel.Create(args)
             valign = "top",
         }
 
+        --The rulebook's twelve traits, read in the portrait's frame. All of
+        --them, whatever has been revealed: it is the rules, not the NPC.
+        local referenceRows = {}
+        for _, trait in ipairs(NEGRules.traits) do
+            local lines = {
+                gui.Label{
+                    classes = { "sizeM" },
+                    width = "100%",
+                    height = "auto",
+                    halign = "left",
+                    valign = "top",
+                    text = trait.text,
+                },
+                gui.Label{
+                    classes = { "sizeXs", "noBold" },
+                    width = "100%",
+                    height = "auto",
+                    halign = "left",
+                    valign = "top",
+                    tmargin = 2,
+                    textWrap = true,
+                    markdown = true,
+                    text = "**Motivation:** " .. trait.motivation,
+                },
+                gui.Label{
+                    classes = { "sizeXs", "noBold" },
+                    width = "100%",
+                    height = "auto",
+                    halign = "left",
+                    valign = "top",
+                    tmargin = 2,
+                    textWrap = true,
+                    markdown = true,
+                    text = "**Pitfall:** " .. trait.pitfall,
+                },
+            }
+            for _, example in ipairs(trait.examples) do
+                lines[#lines + 1] = gui.Label{
+                    classes = { "sizeXs", "noBold", "fgMuted" },
+                    width = "100%-10",
+                    height = "auto",
+                    halign = "right",
+                    valign = "top",
+                    tmargin = 3,
+                    textWrap = true,
+                    text = example,
+                }
+            end
+            referenceRows[#referenceRows + 1] = gui.Panel{
+                width = "100%",
+                height = "auto",
+                flow = "vertical",
+                halign = "left",
+                valign = "top",
+                bmargin = 10,
+                children = lines,
+            }
+        end
+
+        local reference = gui.Panel{
+            classes = { "bordered", "collapsed" },
+            width = "100%",
+            height = "100%",
+            halign = "left",
+            valign = "top",
+            vscroll = true,
+
+            gui.Panel{
+                width = "100%-16",
+                height = "auto",
+                flow = "vertical",
+                halign = "center",
+                valign = "top",
+                tmargin = 8,
+                children = referenceRows,
+            },
+        }
+
+        --Per window: the board's rebuilds keep it, a fresh window starts on the NPC.
+        local m_showReference = false
+        local m_hasPortrait = false
+        local referenceButton
+
+        --- The NPC or the reference in the frame. With no portrait there is
+        --- nothing to swap back to, so the reference stays and the button goes.
+        local function ApplyFrame()
+            local showReference = m_showReference or not m_hasPortrait
+            portrait:SetClass("collapsed", showReference)
+            reference:SetClass("collapsed", not showReference)
+            referenceButton:SetClass("collapsed", not m_hasPortrait)
+            referenceButton:SetClass("bgSuccess", m_showReference)
+            referenceButton:SetClass("bgFg", not m_showReference)
+        end
+
+        --- @param portraitid string
+        SetPortrait = function(portraitid)
+            m_hasPortrait = portraitid ~= ""
+            if m_hasPortrait then
+                portrait.bgimage = portraitid
+            end
+            ApplyFrame()
+        end
+
+        referenceButton = gui.Panel{
+            classes = { "bgFg", "collapsed" },
+            floating = true,
+            width = NEGConstants.referenceButtonSize,
+            height = NEGConstants.referenceButtonSize,
+            halign = "right",
+            valign = "top",
+            hmargin = 6,
+            vmargin = 6,
+            bgimage = NEGConstants.iconReference,
+            hover = THCWidgets.Tooltip("Motivations and pitfalls"),
+            press = function()
+                m_showReference = not m_showReference
+                ApplyFrame()
+            end,
+        }
+
         portraitColumn = gui.Panel{
             classes = { "collapsed" },
             width = NEGConstants.playerPortraitWidth,
@@ -1013,6 +1134,8 @@ function NEGRunPanel.Create(args)
             rmargin = NEGConstants.playerPortraitGap,
 
             portrait,
+            reference,
+            referenceButton,
         }
 
         --Two panels on one line: the NPC at a fixed width, the form taking the
@@ -1268,11 +1391,7 @@ function NEGRunPanel.Create(args)
             if not director then
                 portraitColumn:SetClass("collapsed", false)
 
-                local portraitid = def ~= nil and def:try_get("portraitid", "") or ""
-                portrait:SetClass("collapsed", portraitid == "")
-                if portraitid ~= "" then
-                    portrait.bgimage = portraitid
-                end
+                SetPortrait(def ~= nil and def:try_get("portraitid", "") or "")
             end
 
             if finished then
