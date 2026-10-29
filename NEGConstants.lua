@@ -44,6 +44,12 @@ NEGConstants.playerPortraitWidth =
     math.floor(NEGConstants.playerWorkingHeight * 2 / 3)
 NEGConstants.playerPortraitGap = 16
 
+--- How solid the window's background is while a negotiation is running, 0 (clear) to 1 (opaque).
+NEGConstants.runBackgroundOpacity = 0.90
+
+--- How solid the bordered frames inside the window are while a negotiation is running, 0 (clear) to 1 (opaque).
+NEGConstants.runFrameOpacity = 0.85
+
 --- Footer cells. The band, its rule and the window's padding are the
 --- DialogShell's; only the split inside the band is ours. Whole percentages,
 --- and the middle cell carries the odd point so three of them sum to 100.

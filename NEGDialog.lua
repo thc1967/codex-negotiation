@@ -72,6 +72,16 @@ local function RunHeaderInfo()
     return table.concat(parts, "  |  ")
 end
 
+--- Fades the window while a negotiation is in play so the table shows through.
+--- @param shell DialogShell
+local function ApplyRunFade(shell)
+    local live = NEGRun.Active()
+    THCWidgets.ApplyWindowFade(shell,
+        live ~= nil and live:try_get("status") == NEGConstants.statusRunning,
+        NEGConstants.runBackgroundOpacity,
+        NEGConstants.runFrameOpacity)
+end
+
 --- One cell of a footer. Cells are equal thirds unless a state asks for its
 --- own split, so contents land left, centre and right whichever a state fills.
 --- @param slot nil|Panel
@@ -252,7 +262,27 @@ function NEGDialog.Create()
     local setupFooter = BuildFooter(setupPanel.footer)
 
     local runFooter = BuildFooter{
-        { slot = showButton },
+        {
+            slot = gui.Panel{
+                width = "100%",
+                height = "auto",
+                flow = "horizontal",
+                halign = "left",
+                valign = "center",
+
+                showButton,
+
+                THCWidgets.BackdropButton{
+                    noun = "negotiation",
+                    refreshEvent = "negotiationChanged",
+                    image = function()
+                        local live = NEGRun.Active()
+                        local def = live ~= nil and live:Definition() or nil
+                        return def ~= nil and def:try_get("image", "") or ""
+                    end,
+                },
+            },
+        },
         {
             slot = gui.Button{
                 classes = { "sizeL" },
@@ -352,6 +382,7 @@ function NEGDialog.Create()
             NEGRun.Pump()
             shell:Root():FireEventTree("negotiationChanged")
             shell:SetSubtitle(RunHeaderInfo())
+            ApplyRunFade(shell)
         end,
 
         onCreate = function(shell)
@@ -359,6 +390,7 @@ function NEGDialog.Create()
             NEGRun.MigrateLive()
             NEGRun.Pump()
             shell:Root():FireEventTree("negotiationChanged")
+            ApplyRunFade(shell)
         end,
 
         onDestroy = function()
@@ -434,11 +466,13 @@ function NEGDialog.CreatePlayerView()
         refresh = function(shell)
             shell:Root():FireEventTree("negotiationChanged")
             Apply(shell)
+            ApplyRunFade(shell)
         end,
 
         onCreate = function(shell)
             m_openWindows = m_openWindows + 1
             Apply(shell)
+            ApplyRunFade(shell)
         end,
 
         onDestroy = function()
